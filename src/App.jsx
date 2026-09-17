@@ -1,34 +1,25 @@
-import AffinityCard from './components/AffinityCard'
-import ChallengeCard from './components/ChallengeCard'
-import CommunityPicks from './components/CommunityPicks'
-import Header from './components/Header'
-import HeroBanner from './components/HeroBanner'
-import RecommendationsCarousel from './components/RecommendationsCarousel'
-import Sidebar from './components/Sidebar'
+import { Navigate, Route, Routes } from 'react-router-dom'
+import AppLayout from './layouts/AppLayout'
+import Login from './pages/Login'
+import Catalogo from './pages/Catalogo'
+import LecturaInteractiva from './pages/LecturaInteractiva'
+import Recomendaciones from './pages/Recomendaciones'
+import Historial from './pages/Historial'
 
 function App() {
   return (
-    <div className="bg-background font-body-md text-on-surface antialiased min-h-screen">
-      <Header />
-      <Sidebar activePath="recomendaciones-ia" />
+    <Routes>
+      <Route path="/" element={<Login />} />
 
-      <div className="pl-64">
-        <main className="w-full pt-16 px-gutter pb-space-xl bg-background min-h-screen">
-          <div className="flex flex-col w-full">
-            <HeroBanner />
+      <Route element={<AppLayout />}>
+        <Route path="/catalogo" element={<Catalogo />} />
+        <Route path="/lectura" element={<LecturaInteractiva />} />
+        <Route path="/recomendaciones" element={<Recomendaciones />} />
+        <Route path="/historial" element={<Historial />} />
+      </Route>
 
-            <div className="grid grid-cols-1 lg:grid-cols-12 gap-space-lg mb-space-xl">
-              <AffinityCard />
-              <ChallengeCard />
-            </div>
-
-            <RecommendationsCarousel />
-
-            <CommunityPicks />
-          </div>
-        </main>
-      </div>
-    </div>
+      <Route path="*" element={<Navigate to="/" replace />} />
+    </Routes>
   )
 }
 
