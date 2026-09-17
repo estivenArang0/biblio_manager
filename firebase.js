@@ -1,24 +1,19 @@
-// Importamos las funciones necesarias del SDK de Firebase
-import { initializeApp } from 'firebase/app'
-import { getAuth } from 'firebase/auth'
-import { getFirestore } from 'firebase/firestore'
+// Import the functions you need from the SDKs you need
+import { initializeApp } from "firebase/app";
+import { getFirestore } from "firebase/firestore";
 
-// Configuración leída desde variables de entorno (.env)
-// Vite expone estas variables a través de import.meta.env
+// Your web app's Firebase configuration
 const firebaseConfig = {
-  apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
-  authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN,
-  projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID,
-  storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET,
-  messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID,
-  appId: import.meta.env.VITE_FIREBASE_APP_ID,
-}
+  apiKey: "AIzaSyB6cLV4JpCH6QDtD0TWdvSjaiQv_i4Lhxo",
+  authDomain: "bibliomanager-d452c.firebaseapp.com",
+  projectId: "bibliomanager-d452c",
+  storageBucket: "bibliomanager-d452c.firebasestorage.app",
+  messagingSenderId: "930802451691",
+  appId: "1:930802451691:web:4a9e4dcd3c2bf02115eaae"
+};
 
-// Inicializamos la app de Firebase (una sola vez para todo el proyecto)
-const app = initializeApp(firebaseConfig)
+// Initialize Firebase
+const app = initializeApp(firebaseConfig);
 
-// Exportamos Authentication y Firestore para usarlos en cualquier componente
-export const auth = getAuth(app)
-export const db = getFirestore(app)
-
-export default app
+// Initialize Firestore and export it so we can use it in other files
+export const db = getFirestore(app);

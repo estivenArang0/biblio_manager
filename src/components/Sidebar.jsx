@@ -1,46 +1,51 @@
-import { navItems } from '../data/content'
+import { NavLink } from 'react-router-dom'
 
-function Sidebar({ activePath }) {
+const navItems = [
+  { path: '/catalogo', label: 'Catálogo de Libros', icon: 'auto_stories' },
+  { path: '/lectura', label: 'Lectura Interactiva', icon: 'menu_book' },
+  { path: '/recomendaciones', label: 'Recomendaciones IA', icon: 'psychology' },
+  { path: '/historial', label: 'Historial & Movimientos', icon: 'history' },
+]
+
+function Sidebar({ userRole = 'Estudiante' }) {
   return (
-    <aside className="fixed left-0 top-16 bottom-0 w-64 bg-surface-container-low/60 backdrop-blur-md border-r border-surface-variant/30 z-40 flex flex-col justify-between p-space-md">
-      <div className="flex flex-col gap-space-lg">
-        <div className="px-space-sm pt-space-xs">
-          <span className="font-label-sm text-label-sm uppercase tracking-widest text-on-surface-variant/80 font-semibold">
-            Colecciones &amp; Módulos
+    <aside className="fixed left-0 top-16 bottom-0 w-64 bg-surface-container-low shadow-[0_1px_8px_rgba(0,0,0,0.04)] z-40 flex flex-col justify-between pt-space-md pb-space-lg">
+      <div className="flex flex-col gap-space-md">
+        <div className="px-space-md">
+          <span className="font-label-sm text-label-sm uppercase tracking-wider text-on-surface-variant">
+            Navegación Principal
           </span>
         </div>
-        <nav className="flex flex-col gap-1.5">
-          {navItems.map((item) => {
-            const isActive = item.path === activePath
-            return (
-              <a
-                key={item.path}
-                aria-current={isActive ? 'page' : undefined}
-                className={
-                  isActive
-                    ? 'flex items-center gap-space-sm px-space-md py-2.5 transition-colors bg-primary-container text-on-primary font-semibold rounded-lg'
-                    : 'flex items-center gap-space-sm px-space-md py-2.5 rounded-lg text-on-surface-variant hover:bg-surface-container-high hover:text-on-surface font-label-md text-label-md transition-colors'
-                }
-                href="#"
-              >
-                <span className="material-symbols-outlined text-[20px]">{item.icon}</span>
-                <span>{item.label}</span>
-              </a>
-            )
-          })}
+        <nav className="px-space-sm flex flex-col gap-space-xs">
+          {navItems.map((item) => (
+            <NavLink
+              key={item.path}
+              to={item.path}
+              className={({ isActive }) =>
+                isActive
+                  ? 'flex items-center gap-space-sm px-space-md py-space-sm rounded-lg font-label-lg text-label-lg bg-primary text-on-primary shadow-[0_1px_2px_rgba(9,20,38,0.05)] transition-all'
+                  : 'flex items-center gap-space-sm px-space-md py-space-sm rounded-lg font-label-lg text-label-lg text-on-surface-variant hover:bg-surface-container-high hover:text-on-surface transition-all'
+              }
+            >
+              <span className="material-symbols-outlined text-title-lg">{item.icon}</span>
+              <span>{item.label}</span>
+            </NavLink>
+          ))}
         </nav>
       </div>
-      <div className="flex flex-col gap-space-sm pt-space-md border-t border-surface-variant/30">
-        <div className="px-space-sm flex items-center justify-between text-on-surface-variant">
-          <span className="font-label-sm text-label-sm uppercase tracking-wider">Almacenamiento</span>
-          <span className="font-label-sm text-label-sm">68%</span>
+      <div className="px-space-md flex flex-col gap-space-sm">
+        <div className="p-space-sm bg-surface-container rounded-lg flex flex-col gap-space-xs">
+          <div className="flex items-center justify-between">
+            <span className="font-label-sm text-label-sm text-on-surface-variant">Credencial</span>
+            <span className="inline-flex items-center px-2 py-0.5 rounded font-label-sm text-label-sm bg-surface-container-high text-on-surface">
+              {userRole}
+            </span>
+          </div>
+          <div className="flex items-center gap-2 pt-space-xs">
+            <span className="w-2 h-2 rounded-full bg-secondary-container"></span>
+            <span className="font-label-sm text-label-sm text-on-surface-variant">Conexión en línea</span>
+          </div>
         </div>
-        <div className="w-full h-1.5 bg-surface-container rounded-full overflow-hidden">
-          <div className="bg-secondary h-full rounded-full w-[68%]"></div>
-        </div>
-        <span className="px-space-sm font-label-sm text-label-sm text-on-surface-variant">
-          34 de 50 tomos descargados
-        </span>
       </div>
     </aside>
   )
