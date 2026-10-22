@@ -1,253 +1,568 @@
-import { useState } from 'react'
-import { completedBooks, movementFilters, statCards, timelineEvents } from '../data/history'
+import { useState, useEffect, useMemo } from 'react'
 
 function Historial() {
-  const [activeFilter, setActiveFilter] = useState('all')
-  const [modalOpen, setModalOpen] = useState(false)
-  const [format, setFormat] = useState('pdf')
-  const [exporting, setExporting] = useState(false)
+  const [activeTab, setActiveTab] = useState('todos')
+  const [periodo, setPeriodo] = useState('3_meses')
+  const [solicitudes, setSolicitudes] = useState([])
+  const [prestamos, setPrestamos] = useState([])
+  const [librosCatalogo, setLibrosCatalogo] = useState([])
 
-  const visibleEvents =
-    activeFilter === 'all' ? timelineEvents : timelineEvents.filter((e) => e.category === activeFilter)
+  const usuario = JSON.parse(localStorage.getItem('usuario_biblio') || '{}')
+  const esBibliotecario = usuario.rol === 'Bibliotecario'
+  const userEmail = usuario.correo || usuario.email || 'estudiante@tdea.edu.co'
 
-  const handleExport = () => {
-    setExporting(true)
-    setTimeout(() => {
-      setExporting(false)
-      setModalOpen(false)
-      alert('Informe generado con éxito en formato ' + format.toUpperCase())
-    }, 800)
+  const cargarDatos = () => {
+    try {
+      const storedSolicitudes = JSON.parse(localStorage.getItem('solicitudes_prestamo') || '[]')
+      const storedPrestamos = JSON.parse(localStorage.getItem('prestamos_biblio') || '[]')
+      const storedLibros = JSON.parse(localStorage.getItem('catalogo_libros_agregados') || '[]')
+
+      setSolicitudes(storedSolicitudes)
+      setPrestamos(storedPrestamos)
+      setLibrosCatalogo(storedLibros)
+    } catch (e) {
+      console.error(e)
+    }
   }
 
-  return (
-    <div className="w-full max-w-7xl mx-auto px-margin py-space-xl flex flex-col gap-space-xl">
-      <div className="flex flex-col lg:flex-row lg:items-end justify-between gap-space-md">
-        <div className="flex flex-col gap-space-xs max-w-3xl">
-          <div className="flex items-center gap-2">
-            <span className="font-label-sm text-label-sm uppercase tracking-widest text-secondary">Registro Institucional</span>
-            <span className="w-1 h-1 rounded-full bg-outline-variant"></span>
-            <span className="font-label-sm text-label-sm text-on-surface-variant font-medium">Expediente ID: #AC-8849-2025</span>
+  useEffect(() => {
+    cargarDatos()
+    window.addEventListener('storage', cargarDatos)
+    return () => window.removeEventListener('storage', cargarDatos)
+  }, [])
+
+  // Acción para devolver libro (Estudiante / Docente)
+  const handleDevolver = (id) => {
+    try {
+      const actualizados = prestamos.map((it) =>
+        it.id === id
+          ? {
+              ...it,
+              statusLabel: 'Devuelto a sala',
+              statusClass: 'bg-surface-container text-on-surface-variant',
+              meta2: 'Devolución confirmada en sala',
+            }
+          : it
+      )
+      localStorage.setItem('prestamos_biblio', JSON.stringify(actualizados))
+      setPrestamos(actualizados)
+      window.dispatchEvent(new Event('storage'))
+    } catch (e) {
+      console.error(e)
+    }
+  }
+
+  // =========================================================================
+  // VISTA 1: BITÁCORA DE AUDITORÍA Y ACCIONES (EXCLUSIVA BIBLIOTECARIO)
+  // =========================================================================
+  const accionesBibliotecario = useMemo(() => {
+    const lista = []
+
+    // 1. Solicitudes aprobadas o rechazadas gestionadas por el bibliotecario
+    solicitudes.forEach((s) => {
+      if (s.status === 'APROBADO') {
+        lista.push({
+          id: `sol-${s.id}`,
+          title: `Préstamo Aprobado: ${s.title}`,
+          sub: `Solicitante: ${s.userEmail} (${s.userRole || 'Estudiante'})`,
+          date: s.date || 'Reciente',
+          statusLabel: 'Aprobado',
+          statusClass: 'bg-emerald-100 text-emerald-900 border border-emerald-300',
+          meta: `Plazo: ${s.plazo || 'Estándar'}`,
+          meta2: s.signature || 'BIB-REG',
+          icon: 'task_alt',
+          tipo: 'aprobado',
+          image: s.image,
+        })
+      } else if (s.status === 'RECHAZADO') {
+        lista.push({
+          id: `sol-${s.id}`,
+          title: `Préstamo Rechazado: ${s.title}`,
+          sub: `Solicitante: ${s.userEmail} (${s.userRole || 'Estudiante'})`,
+          date: s.date || 'Reciente',
+          statusLabel: 'Rechazado',
+          statusClass: 'bg-rose-100 text-rose-900 border border-rose-300',
+          meta: 'Disponibilidad restringida en sala',
+          meta2: s.signature || 'BIB-REG',
+          icon: 'cancel',
+          tipo: 'rechazado',
+          image: s.image,
+        })
+      }
+    })
+
+    // 2. Libros registrados en el acervo por el bibliotecario
+    librosCatalogo.forEach((b) => {
+      lista.push({
+        id: `book-${b.id}`,
+        title: `Obra Incorporada al Acervo: ${b.title}`,
+        sub: `Autor: ${b.author} • Materia: ${b.tag || b.genre || 'General'}`,
+        date: b.year || '2026',
+        statusLabel: 'Registro de Acervo',
+        statusClass: 'bg-blue-100 text-blue-900 border border-blue-300',
+        meta: `Signatura: ${b.signature || 'BIB-001'}`,
+        meta2: `Formato ${b.format || 'Digital'}`,
+        icon: 'library_add',
+        tipo: 'registro',
+        image: b.image,
+      })
+    })
+
+    return lista
+  }, [solicitudes, librosCatalogo])
+
+  const accionesFiltradasAdmin = useMemo(() => {
+    if (activeTab === 'todos') return accionesBibliotecario
+    if (activeTab === 'aprobados') return accionesBibliotecario.filter((a) => a.tipo === 'aprobado')
+    if (activeTab === 'rechazados') return accionesBibliotecario.filter((a) => a.tipo === 'rechazado')
+    if (activeTab === 'registros') return accionesBibliotecario.filter((a) => a.tipo === 'registro')
+    return accionesBibliotecario
+  }, [accionesBibliotecario, activeTab])
+
+  // =========================================================================
+  // VISTA 2: HISTORIAL PERSONAL (ESTUDIANTE / DOCENTE)
+  // =========================================================================
+  const misMovimientos = useMemo(() => {
+    // Filtrar solo los movimientos pertenecientes al usuario conectado
+    return prestamos
+      .filter((item) => !item.userEmail || item.userEmail === userEmail)
+      .map((item) => ({
+        ...item,
+        tipo: item.statusLabel?.toLowerCase().includes('devuelto')
+          ? 'devolucion'
+          : item.statusLabel?.includes('pts')
+          ? 'terminado'
+          : 'prestamo',
+      }))
+  }, [prestamos, userEmail])
+
+  const movimientosFiltradosUsuario = useMemo(() => {
+    if (activeTab === 'todos') return misMovimientos
+    if (activeTab === 'prestamos')
+      return misMovimientos.filter((m) => m.tipo === 'prestamo')
+    if (activeTab === 'devoluciones')
+      return misMovimientos.filter((m) => m.tipo === 'devolucion')
+    if (activeTab === 'terminados')
+      return misMovimientos.filter((m) => m.tipo === 'terminado')
+    return misMovimientos
+  }, [misMovimientos, activeTab])
+
+  // Contadores métricos de usuario
+  const prestamosActivosCount = misMovimientos.filter((i) => i.tipo === 'prestamo').length
+  const librosLeidosCount = misMovimientos.filter((i) => i.tipo === 'terminado' || i.tipo === 'devolucion').length
+  const horasLectura = Math.round(librosLeidosCount * 3.5)
+
+  // =========================================================================
+  // RENDER CONDICIONAL: BIBLIOTECARIO VS ESTUDIANTE/DOCENTE
+  // =========================================================================
+  if (esBibliotecario) {
+    return (
+      <div className="w-full px-gutter py-space-lg flex flex-col gap-space-lg max-w-[1520px] mx-auto select-none">
+        <header className="flex flex-col md:flex-row md:items-end justify-between gap-space-md">
+          <div className="flex flex-col gap-1">
+            <div className="flex items-center gap-space-xs text-on-surface-variant">
+              <span className="font-label-sm text-label-sm uppercase tracking-widest text-secondary font-medium">
+                PANEL DE AUDITORÍA Y CONTROL
+              </span>
+              <span className="text-on-surface-variant/40">•</span>
+              <span className="font-mono text-xs text-on-surface-variant">Sesión: {usuario.nombre || 'Bibliotecario General'}</span>
+            </div>
+            <h1 className="font-headline-lg text-headline-lg text-on-surface tracking-tight font-serif font-bold">
+              Bitácora de Operaciones del Acervo
+            </h1>
+            <p className="font-body-md text-body-md text-on-surface-variant max-w-3xl mt-0.5">
+              Registro trazable de préstamos aprobados, solicitudes denegadas e incorporaciones de nuevas obras al
+              catálogo institucional.
+            </p>
           </div>
-          <h1 className="font-headline-lg text-headline-lg text-on-surface tracking-tight">Historial & Movimientos del Usuario</h1>
-          <p className="font-body-md text-body-md text-on-surface-variant leading-relaxed">
-            Auditoría cronológica de solicitudes de préstamo, devoluciones realizadas, reservas activas y obras
-            consultadas en fondos físicos y repositorio digital.
+
+          <div>
+            <button
+              onClick={() => alert('Exportando bitácora de auditoría administrativa en formato CSV e informe oficial...')}
+              className="inline-flex items-center gap-2 px-4 py-2.5 rounded-lg bg-black text-white hover:bg-neutral-800 text-xs font-bold shadow-sm transition-all active:scale-[0.98] cursor-pointer"
+              type="button"
+            >
+              <span className="material-symbols-outlined text-sm">download</span>
+              <span>Exportar Bitácora Administrativa</span>
+            </button>
+          </div>
+        </header>
+
+        {/* Métricas de Gestión Administrativa */}
+        <section className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+          <div className="p-5 rounded-xl bg-surface-container-lowest border border-outline-variant/30 shadow-xs flex flex-col justify-between min-h-[120px]">
+            <div className="flex items-center justify-between text-on-surface-variant">
+              <span className="text-[11px] font-bold uppercase tracking-wider">PRÉSTAMOS APROBADOS</span>
+              <span className="material-symbols-outlined text-xl text-emerald-600">task_alt</span>
+            </div>
+            <div className="mt-2">
+              <span className="text-3xl font-bold text-on-surface font-serif">
+                {accionesBibliotecario.filter((a) => a.tipo === 'aprobado').length}
+              </span>
+              <div className="flex items-center gap-1.5 text-xs text-on-surface-variant mt-1">
+                <span className="material-symbols-outlined text-sm text-emerald-600">verified</span>
+                <span>Autorizados formalmente</span>
+              </div>
+            </div>
+          </div>
+
+          <div className="p-5 rounded-xl bg-surface-container-lowest border border-outline-variant/30 shadow-xs flex flex-col justify-between min-h-[120px]">
+            <div className="flex items-center justify-between text-on-surface-variant">
+              <span className="text-[11px] font-bold uppercase tracking-wider">SOLICITUDES DENEGADAS</span>
+              <span className="material-symbols-outlined text-xl text-rose-600">cancel</span>
+            </div>
+            <div className="mt-2">
+              <span className="text-3xl font-bold text-on-surface font-serif">
+                {accionesBibliotecario.filter((a) => a.tipo === 'rechazado').length}
+              </span>
+              <div className="flex items-center gap-1.5 text-xs text-on-surface-variant mt-1">
+                <span>Por reserva o cupo en sala</span>
+              </div>
+            </div>
+          </div>
+
+          <div className="p-5 rounded-xl bg-surface-container-lowest border border-outline-variant/30 shadow-xs flex flex-col justify-between min-h-[120px]">
+            <div className="flex items-center justify-between text-on-surface-variant">
+              <span className="text-[11px] font-bold uppercase tracking-wider">OBRAS REGISTRADAS</span>
+              <span className="material-symbols-outlined text-xl text-secondary">library_add</span>
+            </div>
+            <div className="mt-2">
+              <span className="text-3xl font-bold text-on-surface font-serif">{librosCatalogo.length}</span>
+              <div className="flex items-center gap-1.5 text-xs text-on-surface-variant mt-1">
+                <span>Nuevas incorporaciones</span>
+              </div>
+            </div>
+          </div>
+
+          <div className="p-5 rounded-xl bg-surface-container-lowest border border-outline-variant/30 shadow-xs flex flex-col justify-between min-h-[120px]">
+            <div className="flex items-center justify-between text-on-surface-variant">
+              <span className="text-[11px] font-bold uppercase tracking-wider">ESTADO DE BANDEJA</span>
+              <span className="material-symbols-outlined text-xl text-blue-600">pending_actions</span>
+            </div>
+            <div className="mt-2">
+              <span className="text-3xl font-bold text-on-surface font-serif">
+                {solicitudes.filter((s) => s.status === 'PENDIENTE').length} pendientes
+              </span>
+              <div className="flex items-center gap-1.5 text-xs text-on-surface-variant mt-1">
+                <span>En cola de revisión</span>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        {/* Pestañas de Filtrado Administrativo */}
+        <div className="flex flex-wrap items-center gap-1.5 bg-surface-container-low p-1 rounded-xl w-fit">
+          <button
+            onClick={() => setActiveTab('todos')}
+            className={`px-3.5 py-1.5 rounded-lg text-xs font-semibold transition-all cursor-pointer ${
+              activeTab === 'todos' ? 'bg-black text-white shadow-xs' : 'text-on-surface-variant hover:text-on-surface'
+            }`}
+          >
+            Todas las acciones ({accionesBibliotecario.length})
+          </button>
+          <button
+            onClick={() => setActiveTab('aprobados')}
+            className={`px-3.5 py-1.5 rounded-lg text-xs font-semibold transition-all cursor-pointer ${
+              activeTab === 'aprobados' ? 'bg-black text-white shadow-xs' : 'text-on-surface-variant hover:text-on-surface'
+            }`}
+          >
+            Préstamos autorizados
+          </button>
+          <button
+            onClick={() => setActiveTab('rechazados')}
+            className={`px-3.5 py-1.5 rounded-lg text-xs font-semibold transition-all cursor-pointer ${
+              activeTab === 'rechazados' ? 'bg-black text-white shadow-xs' : 'text-on-surface-variant hover:text-on-surface'
+            }`}
+          >
+            Solicitudes rechazadas
+          </button>
+          <button
+            onClick={() => setActiveTab('registros')}
+            className={`px-3.5 py-1.5 rounded-lg text-xs font-semibold transition-all cursor-pointer ${
+              activeTab === 'registros' ? 'bg-black text-white shadow-xs' : 'text-on-surface-variant hover:text-on-surface'
+            }`}
+          >
+            Obras añadidas al acervo
+          </button>
+        </div>
+
+        {/* Listado de Auditoría */}
+        <section className="bg-surface-container-lowest rounded-xl shadow-xs overflow-hidden border border-outline-variant/20">
+          {accionesFiltradasAdmin.length > 0 ? (
+            <div className="divide-y divide-outline-variant/15">
+              {accionesFiltradasAdmin.map((acc) => (
+                <div
+                  key={acc.id}
+                  className="p-4 md:p-5 flex flex-col md:flex-row items-start md:items-center justify-between gap-4 hover:bg-surface-container-low/40 transition-colors"
+                >
+                  <div className="flex items-center gap-4 min-w-0">
+                    {acc.image ? (
+                      <img src={acc.image} alt={acc.title} className="w-12 h-16 object-cover rounded bg-surface-container shrink-0 shadow-xs" />
+                    ) : (
+                      <div className="w-12 h-16 rounded bg-surface-container-low flex items-center justify-center text-secondary shrink-0">
+                        <span className="material-symbols-outlined text-2xl">{acc.icon}</span>
+                      </div>
+                    )}
+                    <div className="flex flex-col min-w-0">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <h3 className="font-semibold text-sm text-on-surface truncate font-serif">{acc.title}</h3>
+                        <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${acc.statusClass}`}>
+                          {acc.statusLabel}
+                        </span>
+                      </div>
+                      <span className="text-xs text-on-surface-variant mt-0.5">{acc.sub}</span>
+                      <div className="flex items-center gap-2.5 text-[11px] text-on-surface-variant/70 mt-1 font-mono flex-wrap">
+                        <span>{acc.date}</span>
+                        <span>•</span>
+                        <span>{acc.meta}</span>
+                        <span>•</span>
+                        <span className="text-secondary font-semibold">{acc.meta2}</span>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center gap-2 shrink-0 self-end md:self-center">
+                    <span className="text-xs text-on-surface-variant/60 font-mono">Auditoría OK</span>
+                  </div>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <div className="p-16 text-center text-on-surface-variant">
+              <span className="material-symbols-outlined text-5xl mb-2 text-secondary">admin_panel_settings</span>
+              <p className="text-base font-semibold text-on-surface">No hay acciones registradas en esta categoría.</p>
+              <p className="text-xs text-on-surface-variant mt-1">
+                Las solicitudes gestionadas o libros registrados se auditarán aquí automáticamente.
+              </p>
+            </div>
+          )}
+        </section>
+      </div>
+    )
+  }
+
+  // =========================================================================
+  // VISTA ESTUDIANTE / DOCENTE
+  // =========================================================================
+  return (
+    <div className="w-full px-gutter py-space-lg flex flex-col gap-space-lg max-w-[1520px] mx-auto select-none">
+      <header className="flex flex-col md:flex-row md:items-end justify-between gap-space-md">
+        <div className="flex flex-col gap-1">
+          <div className="flex items-center gap-space-xs text-on-surface-variant">
+            <span className="font-label-sm text-label-sm uppercase tracking-widest text-secondary font-medium">
+              REGISTRO PERSONAL DE LECTURA
+            </span>
+            <span className="text-on-surface-variant/40">•</span>
+            <span className="font-mono text-xs text-on-surface-variant">{userEmail}</span>
+          </div>
+          <h1 className="font-headline-lg text-headline-lg text-on-surface tracking-tight font-serif font-bold">
+            Mi Historial & Préstamos
+          </h1>
+          <p className="font-body-md text-body-md text-on-surface-variant max-w-3xl mt-0.5">
+            Registro personal de tus obras en préstamo activo, libros devueltos y puntos obtenidos en trivias de
+            comprensión lectora.
           </p>
         </div>
-        <div className="flex items-center gap-space-sm self-start lg:self-auto">
+
+        <div>
           <button
-            className="flex items-center gap-space-xs px-space-md py-2.5 bg-primary text-on-primary rounded-lg font-label-lg text-label-lg shadow-sm hover:bg-primary-container transition-all"
-            onClick={() => setModalOpen(true)}
+            onClick={() => alert('Generando informe personal de lectura en PDF...')}
+            className="inline-flex items-center gap-2 px-4 py-2.5 rounded-lg bg-black text-white hover:bg-neutral-800 text-xs font-bold shadow-sm transition-all active:scale-[0.98] cursor-pointer"
+            type="button"
           >
-            <span className="material-symbols-outlined text-body-lg">download</span>
-            <span>Exportar informe en PDF / CSV</span>
+            <span className="material-symbols-outlined text-sm">download</span>
+            <span>Descargar Certificado de Lectura</span>
           </button>
+        </div>
+      </header>
+
+      {/* Tarjetas Métricas Personales */}
+      <section className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+        <div className="p-5 rounded-xl bg-surface-container-lowest border border-outline-variant/30 shadow-xs flex flex-col justify-between min-h-[120px]">
+          <div className="flex items-center justify-between text-on-surface-variant">
+            <span className="text-[11px] font-bold uppercase tracking-wider">OBRAS CONSULTADAS</span>
+            <span className="material-symbols-outlined text-xl">menu_book</span>
+          </div>
+          <div className="mt-2">
+            <span className="text-3xl font-bold text-on-surface font-serif">{librosLeidosCount}</span>
+            <div className="flex items-center gap-1.5 text-xs text-on-surface-variant mt-1">
+              <span className="material-symbols-outlined text-sm text-secondary">verified</span>
+              <span>En tu cuenta activa</span>
+            </div>
+          </div>
+        </div>
+
+        <div className="p-5 rounded-xl bg-surface-container-lowest border border-outline-variant/30 shadow-xs flex flex-col justify-between min-h-[120px]">
+          <div className="flex items-center justify-between text-on-surface-variant">
+            <span className="text-[11px] font-bold uppercase tracking-wider">TIEMPO ESTIMADO</span>
+            <span className="material-symbols-outlined text-xl">schedule</span>
+          </div>
+          <div className="mt-2">
+            <span className="text-3xl font-bold text-on-surface font-serif">{horasLectura} hrs</span>
+            <div className="flex items-center gap-1.5 text-xs text-on-surface-variant mt-1">
+              <span>Acumulado formativo</span>
+            </div>
+          </div>
+        </div>
+
+        <div className="p-5 rounded-xl bg-surface-container-lowest border border-outline-variant/30 shadow-xs flex flex-col justify-between min-h-[120px]">
+          <div className="flex items-center justify-between text-on-surface-variant">
+            <span className="text-[11px] font-bold uppercase tracking-wider">PRÉSTAMOS ACTIVOS</span>
+            <span className="material-symbols-outlined text-xl text-amber-700">pending_actions</span>
+          </div>
+          <div className="mt-2">
+            <span className="text-3xl font-bold text-on-surface font-serif">{prestamosActivosCount} en curso</span>
+            <div className="flex items-center gap-1.5 text-xs text-on-surface-variant mt-1">
+              <span className={`w-2 h-2 rounded-full ${prestamosActivosCount > 0 ? 'bg-amber-600' : 'bg-emerald-600'}`}></span>
+              <span>{prestamosActivosCount > 0 ? 'Ejemplares en tu poder' : 'Sin préstamos pendientes'}</span>
+            </div>
+          </div>
+        </div>
+
+        <div className="p-5 rounded-xl bg-surface-container-lowest border border-outline-variant/30 shadow-xs flex flex-col justify-between min-h-[120px]">
+          <div className="flex items-center justify-between text-on-surface-variant">
+            <span className="text-[11px] font-bold uppercase tracking-wider">ESTADO ACADÉMICO</span>
+            <span className="material-symbols-outlined text-xl text-emerald-600">check_circle</span>
+          </div>
+          <div className="mt-2">
+            <span className="text-3xl font-bold text-on-surface font-serif">Al día</span>
+            <div className="flex items-center gap-1.5 text-xs text-emerald-700 mt-1 font-medium">
+              <span className="material-symbols-outlined text-sm">verified_user</span>
+              <span>Sin sanciones ni multas</span>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      {/* Pestañas de Filtro para Usuario */}
+      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 pt-2">
+        <div className="flex flex-wrap items-center gap-1.5 bg-surface-container-low p-1 rounded-xl">
+          <button
+            onClick={() => setActiveTab('todos')}
+            className={`px-3.5 py-1.5 rounded-lg text-xs font-semibold transition-all cursor-pointer ${
+              activeTab === 'todos' ? 'bg-black text-white shadow-xs' : 'text-on-surface-variant hover:text-on-surface'
+            }`}
+          >
+            Todos mis registros ({misMovimientos.length})
+          </button>
+          <button
+            onClick={() => setActiveTab('prestamos')}
+            className={`px-3.5 py-1.5 rounded-lg text-xs font-semibold transition-all cursor-pointer ${
+              activeTab === 'prestamos' ? 'bg-black text-white shadow-xs' : 'text-on-surface-variant hover:text-on-surface'
+            }`}
+          >
+            Préstamos activos ({prestamosActivosCount})
+          </button>
+          <button
+            onClick={() => setActiveTab('devoluciones')}
+            className={`px-3.5 py-1.5 rounded-lg text-xs font-semibold transition-all cursor-pointer ${
+              activeTab === 'devoluciones' ? 'bg-black text-white shadow-xs' : 'text-on-surface-variant hover:text-on-surface'
+            }`}
+          >
+            Devoluciones realizadas
+          </button>
+          <button
+            onClick={() => setActiveTab('terminados')}
+            className={`px-3.5 py-1.5 rounded-lg text-xs font-semibold transition-all cursor-pointer ${
+              activeTab === 'terminados' ? 'bg-black text-white shadow-xs' : 'text-on-surface-variant hover:text-on-surface'
+            }`}
+          >
+            Puntos y Trivias
+          </button>
+        </div>
+
+        <div className="flex items-center gap-2">
+          <div className="flex items-center gap-1 px-3 py-1.5 bg-surface-container-low text-xs rounded-lg text-on-surface font-medium border border-outline-variant/20">
+            <span className="material-symbols-outlined text-sm text-on-surface-variant">calendar_month</span>
+            <select
+              value={periodo}
+              onChange={(e) => setPeriodo(e.target.value)}
+              className="bg-transparent focus:outline-none cursor-pointer"
+            >
+              <option value="3_meses">Últimos 3 meses</option>
+              <option value="semestre">Semestre actual</option>
+              <option value="anio">Año en curso</option>
+            </select>
+          </div>
         </div>
       </div>
 
-      {/* Estadísticas */}
-      <section className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-space-md">
-        {statCards.map((stat) => (
-          <div key={stat.label} className="bg-surface-container-lowest rounded-xl p-space-lg shadow-sm flex flex-col justify-between transition-all hover:shadow-md">
-            <div className="flex items-start justify-between">
-              <span className="font-label-sm text-label-sm uppercase tracking-wider text-on-surface-variant font-medium">
-                {stat.label}
-              </span>
-              <span className={`material-symbols-outlined text-title-lg ${stat.iconColor}`}>{stat.icon}</span>
-            </div>
-            <div className="my-space-md">
-              <span className="font-display-lg text-display-lg text-on-surface tracking-tight">
-                {stat.value}{' '}
-                {stat.unit && <span className="font-title-md text-title-md text-on-surface-variant font-normal">{stat.unit}</span>}
-              </span>
-            </div>
-            <div className="flex items-center gap-1.5 text-on-surface-variant">
-              {stat.noteIcon ? (
-                <span className="material-symbols-outlined text-body-sm text-primary">{stat.noteIcon}</span>
-              ) : (
-                <span className="w-2 h-2 rounded-full bg-secondary"></span>
-              )}
-              <span className="font-body-sm text-body-sm">{stat.note}</span>
-            </div>
-          </div>
-        ))}
-      </section>
-
-      {/* Filtros */}
-      <section className="bg-surface-container-lowest rounded-xl p-space-md shadow-sm flex flex-col lg:flex-row items-stretch lg:items-center justify-between gap-space-md">
-        <div className="flex items-center gap-1 overflow-x-auto pb-2 lg:pb-0">
-          {movementFilters.map((f) => (
-            <button
-              key={f.value}
-              onClick={() => setActiveFilter(f.value)}
-              className={
-                activeFilter === f.value
-                  ? 'px-space-md py-1.5 bg-primary text-on-primary rounded-lg font-label-md text-label-md transition-all whitespace-nowrap'
-                  : 'px-space-md py-1.5 bg-surface-container-low text-on-surface-variant hover:text-on-surface rounded-lg font-label-md text-label-md transition-all whitespace-nowrap'
-              }
-            >
-              {f.label}
-            </button>
-          ))}
-        </div>
-        <div className="flex items-center gap-space-sm flex-wrap lg:flex-nowrap">
-          <div className="relative inline-flex items-center">
-            <span className="material-symbols-outlined absolute left-2.5 text-on-surface-variant text-body-lg pointer-events-none">
-              calendar_month
-            </span>
-            <select className="bg-surface-container-low text-on-surface font-label-md text-label-md pl-8 pr-8 py-2 rounded-lg appearance-none cursor-pointer focus:outline-none">
-              <option value="1m">Último mes</option>
-              <option value="3m">Últimos 3 meses</option>
-              <option value="ytd">Año actual</option>
-              <option value="academic">Periodo académico completo</option>
-            </select>
-            <span className="material-symbols-outlined absolute right-2 text-on-surface-variant text-label-md pointer-events-none">expand_more</span>
-          </div>
-          <div className="hidden sm:flex items-center gap-1 text-on-surface-variant font-label-sm text-label-sm bg-surface-container-low px-space-sm py-2 rounded-lg">
-            <span>01 Ago 2025</span>
-            <span>—</span>
-            <span className="text-on-surface font-medium">24 Oct 2025</span>
-          </div>
-        </div>
-      </section>
-
-      {/* Timeline */}
-      <section className="flex flex-col gap-space-md">
-        <div className="flex items-center justify-between">
-          <h2 className="font-headline-sm text-headline-sm text-on-surface tracking-tight">Registro Cronológico de Operaciones</h2>
-          <span className="font-label-sm text-label-sm text-on-surface-variant">{visibleEvents.length} eventos registrados</span>
-        </div>
-        <div className="relative pl-6 lg:pl-10 flex flex-col gap-space-md">
-          <div className="absolute left-3 lg:left-5 top-4 bottom-8 w-0.5 bg-surface-container-highest"></div>
-          {visibleEvents.map((event) => (
-            <div key={event.id} className="relative flex items-start gap-space-md">
-              <div className={`relative -left-6 lg:-left-10 flex items-center justify-center w-6 h-6 lg:w-10 lg:h-10 rounded-full shadow-sm ring-4 ring-surface shrink-0 z-10 ${event.iconBg}`}>
-                <span className="material-symbols-outlined text-body-sm lg:text-body-lg">{event.icon}</span>
-              </div>
-              <div className="w-full bg-surface-container-lowest rounded-xl p-space-md lg:p-space-lg shadow-sm flex flex-col md:flex-row md:items-center justify-between gap-space-md">
-                <div className="flex items-start gap-space-md">
-                  <div className="w-14 h-20 bg-surface-container shrink-0 rounded overflow-hidden shadow-sm hidden sm:block">
-                    <img className="w-full h-full object-cover" src={event.image} alt={`Portada de ${event.title}`} />
-                  </div>
-                  <div className="flex flex-col gap-1">
-                    <div className="flex items-center gap-space-xs flex-wrap">
-                      <span className="font-label-sm text-label-sm text-on-surface-variant font-medium">{event.date}</span>
-                      <span className="text-outline-variant">•</span>
-                      <span className={`font-label-sm text-label-sm px-2 py-0.5 rounded-md font-medium ${event.statusClass}`}>
-                        {event.statusLabel}
+      {/* Listado de Movimientos del Usuario */}
+      <section className="bg-surface-container-lowest rounded-xl shadow-xs overflow-hidden border border-outline-variant/20">
+        {movimientosFiltradosUsuario.length > 0 ? (
+          <div className="divide-y divide-outline-variant/15">
+            {movimientosFiltradosUsuario.map((item) => (
+              <div
+                key={item.id}
+                className="p-4 md:p-5 flex flex-col md:flex-row items-start md:items-center justify-between gap-4 hover:bg-surface-container-low/40 transition-colors"
+              >
+                <div className="flex items-center gap-4 min-w-0">
+                  <img
+                    src={item.image}
+                    alt={item.title}
+                    className="w-12 h-16 object-cover rounded bg-surface-container shrink-0 shadow-xs"
+                  />
+                  <div className="flex flex-col min-w-0">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <h3 className="font-semibold text-sm text-on-surface truncate font-serif">{item.title}</h3>
+                      <span
+                        className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
+                          item.tipo === 'devolucion'
+                            ? 'bg-surface-container text-on-surface-variant'
+                            : item.tipo === 'terminado'
+                            ? 'bg-primary text-on-primary'
+                            : 'bg-amber-100 text-amber-900 border border-amber-300'
+                        }`}
+                      >
+                        {item.statusLabel}
                       </span>
                     </div>
-                    <h3 className="font-title-md text-title-md text-on-surface font-semibold">{event.title}</h3>
-                    <p className="font-body-md text-body-md text-on-surface-variant">{event.author}</p>
-                    <div className="flex items-center gap-space-sm pt-1">
-                      <span className="font-label-sm text-label-sm bg-surface-container px-2 py-0.5 rounded text-on-surface-variant">{event.meta}</span>
-                      <span className="font-label-sm text-label-sm text-on-surface-variant">{event.meta2}</span>
+                    <span className="text-xs text-on-surface-variant mt-0.5 truncate">{item.author}</span>
+                    <div className="flex items-center gap-2.5 text-[11px] text-on-surface-variant/70 mt-1 font-mono flex-wrap">
+                      <span>{item.date}</span>
+                      <span>•</span>
+                      <span>{item.meta || 'BIB-001'}</span>
+                      {item.meta2 && (
+                        <>
+                          <span>•</span>
+                          <span className="text-secondary font-semibold">{item.meta2}</span>
+                        </>
+                      )}
                     </div>
                   </div>
                 </div>
-                <div className="flex items-center gap-space-sm self-start md:self-auto shrink-0">
-                  {event.actions.map((action) => (
-                    <button key={action} className="px-space-md py-2 bg-surface-container-high hover:bg-surface-container-highest text-on-surface rounded-lg font-label-md text-label-md transition-colors">
-                      {action}
+
+                <div className="flex items-center gap-2 shrink-0 self-end md:self-center">
+                  {item.tipo === 'prestamo' && (
+                    <button
+                      onClick={() => handleDevolver(item.id)}
+                      className="px-3.5 py-1.5 rounded-lg bg-surface-container-high hover:bg-error-container hover:text-on-error-container text-xs font-semibold transition-colors cursor-pointer"
+                      type="button"
+                    >
+                      Devolver libro
                     </button>
-                  ))}
+                  )}
+                  <button
+                    onClick={() => alert(`Certificado expedido para ${item.title}`)}
+                    className="px-3 py-1.5 rounded-lg bg-surface-container-low hover:bg-surface-container text-on-surface text-xs font-medium transition-colors cursor-pointer"
+                    type="button"
+                  >
+                    Ficha
+                  </button>
                 </div>
               </div>
-            </div>
-          ))}
-        </div>
-      </section>
-
-      {/* Libros completados */}
-      <section className="flex flex-col gap-space-md mt-space-sm">
-        <div className="flex flex-col sm:flex-row sm:items-baseline justify-between gap-space-xs">
-          <div>
-            <h2 className="font-headline-sm text-headline-sm text-on-surface tracking-tight">Libros completados recientemente</h2>
-            <p className="font-body-sm text-body-sm text-on-surface-variant">
-              Registro formal de obras finalizadas por el usuario en sesiones presenciales o digitales.
+            ))}
+          </div>
+        ) : (
+          <div className="p-16 text-center text-on-surface-variant">
+            <span className="material-symbols-outlined text-5xl mb-2 text-secondary">history_edu</span>
+            <p className="text-base font-semibold text-on-surface">No tienes movimientos en este filtro.</p>
+            <p className="text-xs text-on-surface-variant mt-1">
+              Pide un libro en el Catálogo o realiza lecturas interactivas para ver tus registros aquí.
             </p>
           </div>
-          <a className="font-label-md text-label-md text-secondary hover:underline flex items-center gap-1" href="#">
-            <span>Ver registro completo de lecturas</span>
-            <span className="material-symbols-outlined text-body-sm">arrow_forward</span>
-          </a>
-        </div>
-        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-space-md">
-          {completedBooks.map((book) => (
-            <div key={book.id} className="bg-surface-container-lowest rounded-xl p-space-md shadow-sm flex flex-col justify-between gap-space-md group hover:shadow-md transition-shadow">
-              <div className="flex flex-col gap-space-sm">
-                <div className="w-full aspect-[2/3] bg-surface-container rounded-lg overflow-hidden relative shadow-sm">
-                  <img className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300" src={book.image} alt={`Portada de ${book.title}`} />
-                  <span className="absolute top-2 right-2 px-1.5 py-0.5 bg-surface/90 backdrop-blur rounded font-label-sm text-label-sm text-on-surface">
-                    {book.format}
-                  </span>
-                </div>
-                <div className="flex flex-col gap-0.5">
-                  <span className="font-label-sm text-label-sm text-on-surface-variant">{book.finishedDate}</span>
-                  <h4 className="font-title-md text-title-md text-on-surface font-semibold line-clamp-1">{book.title}</h4>
-                  <p className="font-body-sm text-body-sm text-on-surface-variant truncate">{book.author}</p>
-                </div>
-              </div>
-              <div className="flex flex-col gap-1.5 pt-space-xs">
-                <button className="w-full py-1.5 bg-surface-container-high hover:bg-surface-container-highest text-on-surface rounded-lg font-label-sm text-label-sm transition-colors">
-                  Volver a consultar
-                </button>
-                <button className="w-full py-1 text-on-surface-variant hover:text-on-surface font-label-sm text-label-sm transition-colors text-center">
-                  Ver notas ({book.notes})
-                </button>
-              </div>
-            </div>
-          ))}
-        </div>
+        )}
       </section>
-
-      {/* Modal de exportación */}
-      {modalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-primary/40 backdrop-blur-sm transition-opacity duration-200">
-          <div className="bg-surface-container-lowest rounded-xl p-space-lg max-w-md w-full mx-space-md shadow-xl flex flex-col gap-space-md">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-space-xs">
-                <span className="material-symbols-outlined text-secondary text-headline-sm">file_download</span>
-                <h3 className="font-title-lg text-title-lg text-on-surface">Exportar informe de auditoría</h3>
-              </div>
-              <button className="p-1 text-on-surface-variant hover:text-on-surface rounded-md" onClick={() => setModalOpen(false)}>
-                <span className="material-symbols-outlined">close</span>
-              </button>
-            </div>
-            <p className="font-body-md text-body-md text-on-surface-variant">
-              Seleccione el formato oficial para el registro de préstamos, horas acumuladas y estado de devoluciones.
-            </p>
-            <div className="flex flex-col gap-space-sm">
-              <label className="flex items-center gap-space-sm p-space-sm bg-surface-container-low rounded-lg cursor-pointer hover:bg-surface-container">
-                <input checked={format === 'pdf'} onChange={() => setFormat('pdf')} className="accent-primary" name="exportFormat" type="radio" value="pdf" />
-                <div className="flex flex-col">
-                  <span className="font-label-lg text-label-lg text-on-surface font-semibold">Documento Oficial PDF</span>
-                  <span className="font-label-sm text-label-sm text-on-surface-variant">Incluye membrete institucional y firma digital</span>
-                </div>
-              </label>
-              <label className="flex items-center gap-space-sm p-space-sm bg-surface-container-low rounded-lg cursor-pointer hover:bg-surface-container">
-                <input checked={format === 'csv'} onChange={() => setFormat('csv')} className="accent-primary" name="exportFormat" type="radio" value="csv" />
-                <div className="flex flex-col">
-                  <span className="font-label-lg text-label-lg text-on-surface font-semibold">Dataset en CSV (Comma Separated)</span>
-                  <span className="font-label-sm text-label-sm text-on-surface-variant">Para análisis estadístico en software externo</span>
-                </div>
-              </label>
-            </div>
-            <div className="flex items-center justify-end gap-space-sm pt-space-xs">
-              <button className="px-space-md py-2 text-on-surface-variant hover:text-on-surface font-label-md text-label-md rounded-lg" onClick={() => setModalOpen(false)}>
-                Cancelar
-              </button>
-              <button
-                className="px-space-md py-2 bg-primary text-on-primary rounded-lg font-label-md text-label-md hover:bg-primary-container transition-all"
-                onClick={handleExport}
-                disabled={exporting}
-              >
-                {exporting ? 'Procesando...' : 'Generar y descargar'}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   )
 }

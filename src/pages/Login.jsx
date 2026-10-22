@@ -3,14 +3,38 @@ import { Link, useNavigate } from 'react-router-dom'
 
 function Login() {
   const [showPassword, setShowPassword] = useState(false)
-  const [email, setEmail] = useState('')
-  const [password, setPassword] = useState('')
+  const [email, setEmail] = useState('estudiante@tdea.edu.co')
+  const [password, setPassword] = useState('123456')
+  const [rolSeleccionado, setRolSeleccionado] = useState('Estudiante')
+  const [error, setError] = useState('')
   const navigate = useNavigate()
+
+  // Función para seleccionar credenciales de prueba con un clic
+  const handleSelectDemoRole = (rol, correoDemo) => {
+    setRolSeleccionado(rol)
+    setEmail(correoDemo)
+    setPassword('123456')
+  }
 
   const handleSubmit = (event) => {
     event.preventDefault()
-    // TODO: conectar con Firebase Authentication (signInWithEmailAndPassword)
-    navigate('/recomendaciones')
+    setError('')
+
+    if (!email || !password) {
+      setError('Por favor diligencie todos los campos.')
+      return
+    }
+
+    // Objeto de sesión con el rol exacto
+    const sesionUsuario = {
+      correo: email,
+      nombre: email.split('@')[0],
+      rol: rolSeleccionado,
+      token: 'jwt-auth-session-token',
+    }
+
+    localStorage.setItem('usuario_biblio', JSON.stringify(sesionUsuario))
+    navigate('/catalogo')
   }
 
   return (
@@ -34,26 +58,63 @@ function Login() {
                 </div>
               </div>
 
-              <div className="space-y-space-xs mb-space-lg">
+              <div className="space-y-space-xs mb-space-md">
                 <h1 className="font-headline-lg text-headline-lg text-on-surface tracking-tight">
                   Iniciar Sesión en el Acervo
                 </h1>
                 <p className="font-body-md text-body-md text-on-surface-variant">
-                  Acceso unificado para:{' '}
-                  <span className="inline-flex items-center px-2 py-0.5 rounded-md bg-surface-container font-label-sm text-label-sm text-on-surface">
-                    Bibliotecario
-                  </span>
-                  ,{' '}
-                  <span className="inline-flex items-center px-2 py-0.5 rounded-md bg-surface-container font-label-sm text-label-sm text-on-surface">
-                    Docente
-                  </span>{' '}
-                  y{' '}
-                  <span className="inline-flex items-center px-2 py-0.5 rounded-md bg-surface-container font-label-sm text-label-sm text-on-surface">
-                    Estudiante
-                  </span>
-                  .
+                  Selecciona el rol con el que deseas ingresar al sistema:
                 </p>
               </div>
+
+              {/* SELECTOR RÁPIDO DE ROLES */}
+              <div className="mb-6 p-2 rounded-xl bg-surface-container-low border border-outline-variant/30 flex items-center gap-1.5">
+                <button
+                  type="button"
+                  onClick={() => handleSelectDemoRole('Estudiante', 'estudiante@tdea.edu.co')}
+                  className={`flex-1 py-2 px-2 rounded-lg font-label-md text-xs font-semibold flex items-center justify-center gap-1.5 transition-all ${
+                    rolSeleccionado === 'Estudiante'
+                      ? 'bg-primary text-on-primary shadow-sm'
+                      : 'text-on-surface-variant hover:bg-surface-container'
+                  }`}
+                >
+                  <span className="material-symbols-outlined text-base">person</span>
+                  <span>Estudiante</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => handleSelectDemoRole('Docente', 'profesor.jaramillo@tdea.edu.co')}
+                  className={`flex-1 py-2 px-2 rounded-lg font-label-md text-xs font-semibold flex items-center justify-center gap-1.5 transition-all ${
+                    rolSeleccionado === 'Docente'
+                      ? 'bg-secondary text-on-secondary shadow-sm'
+                      : 'text-on-surface-variant hover:bg-surface-container'
+                  }`}
+                >
+                  <span className="material-symbols-outlined text-base">school</span>
+                  <span>Docente</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => handleSelectDemoRole('Bibliotecario', 'bibliotecario.central@tdea.edu.co')}
+                  className={`flex-1 py-2 px-2 rounded-lg font-label-md text-xs font-semibold flex items-center justify-center gap-1.5 transition-all ${
+                    rolSeleccionado === 'Bibliotecario'
+                      ? 'bg-amber-600 text-white shadow-sm'
+                      : 'text-on-surface-variant hover:bg-surface-container'
+                  }`}
+                >
+                  <span className="material-symbols-outlined text-base">shield_person</span>
+                  <span>Bibliotecario</span>
+                </button>
+              </div>
+
+              {error && (
+                <div className="mb-4 p-3 rounded-lg bg-error-container text-on-error-container text-body-sm flex items-center gap-2">
+                  <span className="material-symbols-outlined text-base">error</span>
+                  <span>{error}</span>
+                </div>
+              )}
 
               <form className="space-y-space-md" onSubmit={handleSubmit}>
                 <div className="space-y-1">
@@ -108,45 +169,23 @@ function Login() {
                   </div>
                 </div>
 
-                <div className="flex items-center justify-between pt-1">
-                  <label className="inline-flex items-center space-x-2 cursor-pointer select-none">
-                    <input className="w-4 h-4 rounded bg-surface-container-high text-primary focus:ring-0 accent-primary cursor-pointer" type="checkbox" />
-                    <span className="font-body-sm text-body-sm text-on-surface-variant">Recordar credenciales en este equipo</span>
-                  </label>
-                  <a className="font-label-md text-label-md text-secondary hover:underline" href="#">
-                    ¿Olvidaste tu contraseña?
-                  </a>
-                </div>
-
                 <div className="pt-2">
                   <button
-                    className="w-full py-3 px-space-md rounded-lg bg-secondary text-on-secondary font-label-lg text-label-lg tracking-wide hover:bg-secondary-container hover:text-on-secondary-container transition-colors duration-150 shadow-sm flex items-center justify-center space-x-2"
+                    className="w-full py-3 px-space-md rounded-lg bg-secondary text-on-secondary font-label-lg text-label-lg tracking-wide hover:bg-secondary/90 transition-all shadow-sm flex items-center justify-center space-x-2"
                     type="submit"
                   >
-                    <span>Iniciar sesión</span>
+                    <span>Ingresar como {rolSeleccionado}</span>
                     <span className="material-symbols-outlined text-lg">arrow_forward</span>
                   </button>
                 </div>
               </form>
-
-              <div className="mt-space-md text-center">
-                <span className="font-body-sm text-body-sm text-on-surface-variant relative block">
-                  <span className="bg-surface-container-lowest px-3">o ingresa con tu credencial digital universitaria</span>
-                </span>
-                <div className="mt-space-sm flex justify-center">
-                  <button className="inline-flex items-center space-x-2 px-4 py-2 rounded-lg bg-surface-container-high hover:bg-surface-container-highest text-on-surface font-label-md text-label-md transition-colors" type="button">
-                    <span className="material-symbols-outlined text-lg">badge</span>
-                    <span>SSO Institucional / Carnet Virtual</span>
-                  </button>
-                </div>
-              </div>
             </div>
 
             <div className="pt-space-lg mt-space-md text-center lg:text-left">
               <p className="font-body-sm text-body-sm text-on-surface-variant">
                 ¿No tienes cuenta institucional?{' '}
-                <Link className="font-label-md text-label-md text-secondary hover:underline font-semibold ml-1" to="/registro">
-                  Regístrate para solicitar acceso a la biblioteca
+                <Link className="font-label-md text-label-md text-secondary hover:underline font-semibold ml-1" to="/catalogo">
+                  Explorar catálogo como invitado
                 </Link>
               </p>
             </div>
@@ -162,7 +201,7 @@ function Login() {
                 <span className="font-label-sm text-label-sm uppercase tracking-wider flex items-center gap-1">
                   <span className="material-symbols-outlined text-sm">auto_stories</span> Colecciones Especiales
                 </span>
-                <span className="font-label-sm text-label-sm opacity-60">Catálogo General 2025</span>
+                <span className="font-label-sm text-label-sm opacity-60">TdeA · Catálogo 2026</span>
               </div>
             </div>
 
@@ -190,7 +229,7 @@ function Login() {
                     Servicio de Préstamo e Investigación Digital
                   </span>
                   <span className="font-label-sm text-label-sm text-surface-dim/70 block pt-1">
-                    Consultas técnicas: soporte.biblioteca@institucion.edu
+                    Tecnológico de Antioquia I.U.[cite: 1]
                   </span>
                 </div>
               </div>
