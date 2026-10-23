@@ -1,10 +1,11 @@
-import { Navigate, Route, Routes } from 'react-router-dom'
+import { Route, Routes } from 'react-router-dom'
 import AppLayout from './layouts/AppLayout'
 import Login from './pages/Login'
 import Catalogo from './pages/Catalogo'
 import LecturaInteractiva from './pages/LecturaInteractiva'
 import Recomendaciones from './pages/Recomendaciones'
 import Historial from './pages/Historial'
+import NotFound from './pages/NotFound'
 
 function App() {
   return (
@@ -18,7 +19,7 @@ function App() {
         <Route path="/historial" element={<Historial />} />
       </Route>
 
-      <Route path="*" element={<Navigate to="/" replace />} />
+      <Route path="*" element={<NotFound />} />
     </Routes>
   )
 }
