@@ -1,5 +1,5 @@
-import { useEffect, useState } from 'react'
 import { NavLink } from 'react-router-dom'
+import { leerSesion } from '../utils/storage'
 
 const allNavItems = [
   { path: '/catalogo', label: 'Catálogo de Libros', icon: 'auto_stories', roles: ['Estudiante', 'Docente', 'Bibliotecario'] },
@@ -8,20 +8,12 @@ const allNavItems = [
   { path: '/historial', label: 'Historial & Movimientos', icon: 'history', roles: ['Estudiante', 'Docente', 'Bibliotecario'] },
 ]
 
+/**
+ * El rol se lee al montar el layout (el login monta la aplicación después de
+ * guardar la sesión), sin necesidad de un efecto con setState.
+ */
 function Sidebar() {
-  const [role, setRole] = useState('Estudiante')
-
-  useEffect(() => {
-    const sesion = localStorage.getItem('usuario_biblio')
-    if (sesion) {
-      try {
-        const parsed = JSON.parse(sesion)
-        if (parsed.rol) setRole(parsed.rol)
-      } catch (e) {
-        console.error(e)
-      }
-    }
-  }, [])
+  const role = leerSesion()?.rol || 'Estudiante'
 
   // Filtrar los items de navegación según el rol activo
   const visibleNavItems = allNavItems.filter((item) => item.roles.includes(role))

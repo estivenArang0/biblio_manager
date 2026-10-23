@@ -1,20 +1,17 @@
 import { useState, useEffect } from 'react'
+import { escribirJSON, leerJSON, notificarCambioStorage } from '../utils/storage'
+
+function solicitudesPendientes() {
+  return leerJSON('solicitudes_prestamo', []).filter((s) => s.status === 'PENDIENTE')
+}
 
 function PanelBibliotecario() {
-  const [solicitudes, setSolicitudes] = useState([])
+  const [solicitudes, setSolicitudes] = useState(solicitudesPendientes)
 
-  const cargarSolicitudes = () => {
-    try {
-      const data = JSON.parse(localStorage.getItem('solicitudes_prestamo') || '[]')
-      setSolicitudes(data.filter((s) => s.status === 'PENDIENTE'))
-    } catch (e) {
-      console.error(e)
-    }
-  }
-
+  // Escuchar cambios de storage (misma ventana u otras pestañas). El estado se
+  // actualiza dentro del evento, no durante el montaje del efecto.
   useEffect(() => {
-    cargarSolicitudes()
-    // Escuchar cambios de storage para actualizar en tiempo real
+    const cargarSolicitudes = () => setSolicitudes(solicitudesPendientes())
     window.addEventListener('storage', cargarSolicitudes)
     return () => window.removeEventListener('storage', cargarSolicitudes)
   }, [])
@@ -22,14 +19,14 @@ function PanelBibliotecario() {
   const handleAprobar = (solicitud) => {
     try {
       // 1. Actualizar estado de la solicitud
-      const todas = JSON.parse(localStorage.getItem('solicitudes_prestamo') || '[]')
+      const todas = leerJSON('solicitudes_prestamo', [])
       const actualizadas = todas.map((s) =>
         s.id === solicitud.id ? { ...s, status: 'APROBADO' } : s
       )
-      localStorage.setItem('solicitudes_prestamo', JSON.stringify(actualizadas))
+      escribirJSON('solicitudes_prestamo', actualizadas)
 
       // 2. Registrar el préstamo formal en 'prestamos_biblio'
-      const prestamos = JSON.parse(localStorage.getItem('prestamos_biblio') || '[]')
+      const prestamos = leerJSON('prestamos_biblio', [])
       const nuevoPrestamo = {
         id: Date.now().toString(),
         bookId: solicitud.bookId,
@@ -45,11 +42,11 @@ function PanelBibliotecario() {
         userEmail: solicitud.userEmail,
         actions: ['Devolver', 'Renovar'],
       }
-      localStorage.setItem('prestamos_biblio', JSON.stringify([nuevoPrestamo, ...prestamos]))
+      escribirJSON('prestamos_biblio', [nuevoPrestamo, ...prestamos])
 
-      cargarSolicitudes()
+      setSolicitudes(solicitudesPendientes())
       // Disparar evento para que BookCard se entere si está en la misma ventana
-      window.dispatchEvent(new Event('storage'))
+      notificarCambioStorage()
     } catch (e) {
       console.error(e)
     }
@@ -57,13 +54,13 @@ function PanelBibliotecario() {
 
   const handleRechazar = (solicitudId) => {
     try {
-      const todas = JSON.parse(localStorage.getItem('solicitudes_prestamo') || '[]')
+      const todas = leerJSON('solicitudes_prestamo', [])
       const actualizadas = todas.map((s) =>
         s.id === solicitudId ? { ...s, status: 'RECHAZADO' } : s
       )
-      localStorage.setItem('solicitudes_prestamo', JSON.stringify(actualizadas))
-      cargarSolicitudes()
-      window.dispatchEvent(new Event('storage'))
+      escribirJSON('solicitudes_prestamo', actualizadas)
+      setSolicitudes(solicitudesPendientes())
+      notificarCambioStorage()
     } catch (e) {
       console.error(e)
     }

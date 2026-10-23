@@ -1,5 +1,7 @@
-import { useState, useEffect } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
+import { escribirJSON, leerJSON, leerSesion, notificarCambioStorage } from '../utils/storage'
+import { generarId } from '../utils/text'
 
 const toneClasses = {
   positive: 'bg-surface-container-lowest/95 backdrop-blur text-[11px] font-label-sm text-secondary font-semibold',
@@ -7,97 +9,75 @@ const toneClasses = {
   warning: 'bg-secondary-fixed text-on-secondary-fixed-variant text-[11px] font-label-sm font-semibold',
 }
 
+const mismoLibro = (registro, book) =>
+  registro.bookId === book.id ||
+  registro.title?.toLowerCase().trim() === book.title?.toLowerCase().trim()
+
+/**
+ * Estado de este usuario frente a este libro:
+ * APROBADO (préstamo activo), PENDIENTE (solicitud en revisión) o DISPONIBLE.
+ */
+function calcularEstadoPrestamo(book, userEmail) {
+  const prestamos = leerJSON('prestamos_biblio', [])
+  const yaPrestado = prestamos.some(
+    (p) =>
+      mismoLibro(p, book) &&
+      p.userEmail === userEmail &&
+      !p.statusLabel?.toLowerCase().includes('devuelto') &&
+      p.statusLabel !== 'Cancelado'
+  )
+  if (yaPrestado) return 'APROBADO'
+
+  const solicitudes = leerJSON('solicitudes_prestamo', [])
+  const pendiente = solicitudes.some(
+    (s) => mismoLibro(s, book) && s.userEmail === userEmail && s.status === 'PENDIENTE'
+  )
+  return pendiente ? 'PENDIENTE' : 'DISPONIBLE'
+}
+
 function BookCard({ book, onEdit }) {
   const navigate = useNavigate()
   const [showDetail, setShowDetail] = useState(false)
   const [showDocenteModal, setShowDocenteModal] = useState(false)
   const [plazoDocente, setPlazoDocente] = useState('30 días')
-  const [status, setStatus] = useState('DISPONIBLE')
-  const [userRole, setUserRole] = useState('Estudiante')
-  const [userEmail, setUserEmail] = useState('estudiante@institucion.edu')
 
+  const sesion = leerSesion()
+  const userRole = sesion?.rol || 'Estudiante'
+  const userEmail = sesion?.correo || sesion?.email || 'estudiante@institucion.edu'
   const esBibliotecario = userRole === 'Bibliotecario'
 
-  const sincronizarEstado = () => {
-    try {
-      const sesion = localStorage.getItem('usuario_biblio')
-      let emailActual = userEmail
-      if (sesion) {
-        const u = JSON.parse(sesion)
-        if (u.rol) setUserRole(u.rol)
-        if (u.correo || u.email) {
-          emailActual = u.correo || u.email
-          setUserEmail(emailActual)
-        }
-      }
+  const [status, setStatus] = useState(() => calcularEstadoPrestamo(book, userEmail))
 
-      // 1. Revisar si ESTE usuario tiene el libro en préstamo activo (no devuelto)
-      const prestamos = JSON.parse(localStorage.getItem('prestamos_biblio') || '[]')
-      const yaPrestado = prestamos.some((p) => {
-        const esMismoLibro =
-          p.bookId === book.id ||
-          p.title?.toLowerCase().trim() === book.title?.toLowerCase().trim()
-        const esMismoUsuario = p.userEmail === emailActual
-        const estaActivo =
-          !p.statusLabel?.toLowerCase().includes('devuelto') &&
-          p.statusLabel !== 'Cancelado'
-        return esMismoLibro && esMismoUsuario && estaActivo
-      })
+  const sincronizarEstado = useCallback(() => {
+    setStatus(calcularEstadoPrestamo(book, userEmail))
+  }, [book, userEmail])
 
-      if (yaPrestado) {
-        setStatus('APROBADO')
-        return
-      }
-
-      // 2. Revisar si ESTE usuario tiene una solicitud pendiente de este libro
-      const solicitudes = JSON.parse(localStorage.getItem('solicitudes_prestamo') || '[]')
-      const pendiente = solicitudes.find((s) => {
-        const esMismoLibro =
-          s.bookId === book.id ||
-          s.title?.toLowerCase().trim() === book.title?.toLowerCase().trim()
-        const esMismoUsuario = s.userEmail === emailActual
-        return esMismoLibro && esMismoUsuario && s.status === 'PENDIENTE'
-      })
-
-      if (pendiente) {
-        setStatus('PENDIENTE')
-      } else {
-        setStatus('DISPONIBLE')
-      }
-    } catch (e) {
-      console.error(e)
-    }
-  }
-
+  // El setState se ejecuta dentro del evento de storage, no al montar.
   useEffect(() => {
-    sincronizarEstado()
     window.addEventListener('storage', sincronizarEstado)
     return () => window.removeEventListener('storage', sincronizarEstado)
-  }, [book.id, book.title, userEmail])
+  }, [sincronizarEstado])
 
   const registrarSolicitud = (plazoAsignado) => {
-    try {
-      const solicitudes = JSON.parse(localStorage.getItem('solicitudes_prestamo') || '[]')
-      const nuevaSolicitud = {
-        id: Date.now().toString(),
-        bookId: book.id,
-        title: book.title,
-        author: book.author,
-        signature: book.signature || book.signatura || 'BIB-S/N',
-        image: book.image,
-        userEmail: userEmail,
-        userRole: userRole,
-        plazo: plazoAsignado,
-        date: new Date().toLocaleDateString('es-CO', { day: '2-digit', month: 'short', year: 'numeric' }),
-        status: 'PENDIENTE',
-      }
+    const solicitudes = leerJSON('solicitudes_prestamo', [])
+    const nuevaSolicitud = {
+      id: generarId('sol'),
+      bookId: book.id,
+      title: book.title,
+      author: book.author,
+      signature: book.signature || book.signatura || 'BIB-S/N',
+      image: book.image,
+      userEmail,
+      userRole,
+      plazo: plazoAsignado,
+      date: new Date().toLocaleDateString('es-CO', { day: '2-digit', month: 'short', year: 'numeric' }),
+      status: 'PENDIENTE',
+    }
 
-      localStorage.setItem('solicitudes_prestamo', JSON.stringify([nuevaSolicitud, ...solicitudes]))
+    if (escribirJSON('solicitudes_prestamo', [nuevaSolicitud, ...solicitudes])) {
       setStatus('PENDIENTE')
       setShowDocenteModal(false)
-      window.dispatchEvent(new Event('storage'))
-    } catch (e) {
-      console.error(e)
+      notificarCambioStorage()
     }
   }
 

@@ -1,6 +1,7 @@
 import { useState, useEffect, useMemo } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { catalogBooks as initialBooks } from '../data/catalogBooks'
+import { generarId } from '../utils/text'
 import { researchLines } from '../data/recommendations'
 
 function Recomendaciones() {
@@ -106,8 +107,8 @@ function Recomendaciones() {
   const handleReserve = (book) => {
     const stored = JSON.parse(localStorage.getItem('solicitudes_prestamo') || '[]')
     const nuevaSolicitud = {
-      id: Date.now().toString(),
-      bookId: book.id || Date.now().toString(),
+      id: generarId('sol'),
+      bookId: book.id || generarId('libro'),
       title: book.title,
       author: book.author,
       userEmail: usuario.correo || usuario.email || 'estudiante@tdea.edu.co',

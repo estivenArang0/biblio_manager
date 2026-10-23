@@ -1,26 +1,22 @@
-import { useEffect, useState, useRef } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
+import { leerSesion } from '../utils/storage'
+
+function leerUsuario() {
+  const sesion = leerSesion()
+  return {
+    nombre: sesion?.nombre || 'Usuario TdeA',
+    rol: sesion?.rol || 'Estudiante',
+  }
+}
 
 function Header() {
   const navigate = useNavigate()
   const [searchTerm, setSearchTerm] = useState('')
-  const [user, setUser] = useState({ nombre: 'Elena Rostova', rol: 'Estudiante' })
+  const [user] = useState(leerUsuario)
   const searchInputRef = useRef(null)
 
   useEffect(() => {
-    const sesion = localStorage.getItem('usuario_biblio')
-    if (sesion) {
-      try {
-        const parsed = JSON.parse(sesion)
-        setUser({
-          nombre: parsed.nombre || 'Usuario TdeA',
-          rol: parsed.rol || 'Estudiante',
-        })
-      } catch (e) {
-        console.error(e)
-      }
-    }
-
     // Atajo de teclado global Ctrl+K o Cmd+K
     const handleKeyDown = (e) => {
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') {

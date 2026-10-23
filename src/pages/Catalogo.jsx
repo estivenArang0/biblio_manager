@@ -1,41 +1,38 @@
 import PanelBibliotecario from '../components/PanelBibliotecario'
-import { useState, useMemo, useEffect } from 'react'
+import { useState, useMemo } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import BookCard from '../components/BookCard'
 import { catalogBooks as initialBooks, catalogFilters } from '../data/catalogBooks'
+import { leerJSON } from '../utils/storage'
+import { normalizarTexto as normalizar } from '../utils/text'
 
 function Catalogo() {
-  const [searchParams] = useSearchParams()
+  const [searchParams, setSearchParams] = useSearchParams()
 
-  const [books, setBooks] = useState(() => {
-    try {
-      const guardados = localStorage.getItem('catalogo_libros_agregados')
-      return guardados ? JSON.parse(guardados) : initialBooks
-    } catch {
-      return initialBooks
-    }
-  })
+  const [books, setBooks] = useState(() => leerJSON('catalogo_libros_agregados', initialBooks))
+
+  // Estado para Paginación
+  const [currentPage, setCurrentPage] = useState(1)
+  const [itemsPerPage, setItemsPerPage] = useState(12)
+
+  // El término de búsqueda vive en la URL (?q=). Así el buscador del Header,
+  // los enlaces compartidos y los botones Atrás/Adelante funcionan sin
+  // duplicar el estado en memoria.
+  const search = searchParams.get('q') ?? ''
+  const setSearch = (valor) => {
+    const params = new URLSearchParams(searchParams)
+    if (valor) params.set('q', valor)
+    else params.delete('q')
+    setSearchParams(params, { replace: true })
+    setCurrentPage(1)
+  }
 
   // Filtros
-  const [search, setSearch] = useState('')
   const [genre, setGenre] = useState('')
   const [author, setAuthor] = useState('')
   const [availability, setAvailability] = useState('')
   const [language, setLanguage] = useState('')
   const [period, setPeriod] = useState('')
-
-  // Sincronización con el buscador global de la barra superior (Header)
-  useEffect(() => {
-    const query = searchParams.get('q')
-    if (query !== null) {
-      setSearch(query)
-      setCurrentPage(1)
-    }
-  }, [searchParams])
-
-  // Estado para Paginación
-  const [currentPage, setCurrentPage] = useState(1)
-  const [itemsPerPage, setItemsPerPage] = useState(12)
 
   // Estado para Modal "Agregar libro" (Bibliotecario)
   const [isModalOpen, setIsModalOpen] = useState(false)
@@ -91,13 +88,6 @@ function Catalogo() {
 
   // Filtrado de libros en tiempo real con TODOS los filtros funcionales
   const filteredBooks = useMemo(() => {
-    const normalizar = (txt) =>
-      (txt || '')
-        .normalize('NFD')
-        .replace(/[\u0300-\u036f]/g, '')
-        .toLowerCase()
-        .trim()
-
     return books.filter((book) => {
       // 1. Buscador textual
       const term = normalizar(search)

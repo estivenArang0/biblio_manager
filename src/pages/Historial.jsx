@@ -1,54 +1,46 @@
 import { useState, useEffect, useMemo } from 'react'
+import { escribirJSON, leerJSON, leerSesion, notificarCambioStorage } from '../utils/storage'
 
 function Historial() {
   const [activeTab, setActiveTab] = useState('todos')
   const [periodo, setPeriodo] = useState('3_meses')
-  const [solicitudes, setSolicitudes] = useState([])
-  const [prestamos, setPrestamos] = useState([])
-  const [librosCatalogo, setLibrosCatalogo] = useState([])
+  const [solicitudes, setSolicitudes] = useState(() => leerJSON('solicitudes_prestamo', []))
+  const [prestamos, setPrestamos] = useState(() => leerJSON('prestamos_biblio', []))
+  const [librosCatalogo, setLibrosCatalogo] = useState(() =>
+    leerJSON('catalogo_libros_agregados', [])
+  )
 
-  const usuario = JSON.parse(localStorage.getItem('usuario_biblio') || '{}')
+  const usuario = leerSesion() ?? {}
   const esBibliotecario = usuario.rol === 'Bibliotecario'
   const userEmail = usuario.correo || usuario.email || 'estudiante@tdea.edu.co'
 
-  const cargarDatos = () => {
-    try {
-      const storedSolicitudes = JSON.parse(localStorage.getItem('solicitudes_prestamo') || '[]')
-      const storedPrestamos = JSON.parse(localStorage.getItem('prestamos_biblio') || '[]')
-      const storedLibros = JSON.parse(localStorage.getItem('catalogo_libros_agregados') || '[]')
-
-      setSolicitudes(storedSolicitudes)
-      setPrestamos(storedPrestamos)
-      setLibrosCatalogo(storedLibros)
-    } catch (e) {
-      console.error(e)
-    }
-  }
-
+  // Releer el almacenamiento cuando otra pestaña (o la misma ventana) notifica
+  // cambios. El setState ocurre dentro del evento, no al montar el efecto.
   useEffect(() => {
-    cargarDatos()
-    window.addEventListener('storage', cargarDatos)
-    return () => window.removeEventListener('storage', cargarDatos)
+    const recargar = () => {
+      setSolicitudes(leerJSON('solicitudes_prestamo', []))
+      setPrestamos(leerJSON('prestamos_biblio', []))
+      setLibrosCatalogo(leerJSON('catalogo_libros_agregados', []))
+    }
+    window.addEventListener('storage', recargar)
+    return () => window.removeEventListener('storage', recargar)
   }, [])
 
   // Acción para devolver libro (Estudiante / Docente)
   const handleDevolver = (id) => {
-    try {
-      const actualizados = prestamos.map((it) =>
-        it.id === id
-          ? {
-              ...it,
-              statusLabel: 'Devuelto a sala',
-              statusClass: 'bg-surface-container text-on-surface-variant',
-              meta2: 'Devolución confirmada en sala',
-            }
-          : it
-      )
-      localStorage.setItem('prestamos_biblio', JSON.stringify(actualizados))
+    const actualizados = prestamos.map((it) =>
+      it.id === id
+        ? {
+            ...it,
+            statusLabel: 'Devuelto a sala',
+            statusClass: 'bg-surface-container text-on-surface-variant',
+            meta2: 'Devolución confirmada en sala',
+          }
+        : it
+    )
+    if (escribirJSON('prestamos_biblio', actualizados)) {
       setPrestamos(actualizados)
-      window.dispatchEvent(new Event('storage'))
-    } catch (e) {
-      console.error(e)
+      notificarCambioStorage()
     }
   }
 
