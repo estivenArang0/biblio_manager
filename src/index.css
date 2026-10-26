@@ -40,9 +40,50 @@
   display: none;
 }
 
+/* Visor de lectura: texto seleccionable (necesario para subrayar) y marcas. */
+.lector-texto {
+  user-select: text;
+  -webkit-user-select: text;
+}
+
+.lector-texto ::selection {
+  background: rgba(59, 130, 246, 0.25);
+}
+
+.lector-mark {
+  border-radius: 2px;
+  padding: 0 1px;
+  color: inherit;
+  cursor: pointer;
+}
+
+.lector-mark-amarillo {
+  background: rgba(250, 204, 21, 0.45);
+}
+
+.lector-mark-verde {
+  background: rgba(34, 197, 94, 0.35);
+}
+
+.lector-mark-azul {
+  background: rgba(59, 130, 246, 0.35);
+}
+
+.lector-mark[data-note='1']::after {
+  content: '◆';
+  font-size: 0.55em;
+  vertical-align: super;
+  margin-left: 2px;
+  color: rgba(0, 0, 0, 0.55);
+}
+
 /* Bloqueo a nivel de renderizado para impresión o guardado como PDF */
 @media print {
   body {
+    display: none !important;
+  }
+
+  .lector-contenido {
     display: none !important;
   }
 }

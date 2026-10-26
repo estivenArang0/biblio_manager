@@ -25,16 +25,3 @@ export function contieneTexto(texto, termino) {
   if (!buscado) return true
   return normalizarTexto(texto).includes(buscado)
 }
-
-/**
- * Genera un identificador único legible para movimientos locales
- * (evita depender de Date.now() dentro del render).
- *
- * @param {string} prefijo
- * @returns {string}
- */
-export function generarId(prefijo = 'id') {
-  const marca = Date.now().toString(36)
-  const azar = Math.random().toString(36).slice(2, 8)
-  return `${prefijo}-${marca}-${azar}`
-}

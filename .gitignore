@@ -30,3 +30,6 @@ dist-ssr
 
 # Temporales
 *.tmp
+
+# Base de datos local del API
+server/data
