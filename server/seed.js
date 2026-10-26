@@ -8,7 +8,7 @@ import { addDays, ymd } from './util.js'
  * pero el contenido de lectura y la disponibilidad viven ahora en la base de
  * datos del servidor, nunca en el cliente.
  */
-export const DEMO_PASSWORD = '123456'
+export const DEMO_PASSWORD = process.env.DEMO_PASSWORD || '123456'
 
 export const seedUsers = [
   { nombre: 'Ana María Restrepo', correo: 'estudiante@tdea.edu.co', rol: 'Estudiante' },
@@ -162,6 +162,39 @@ const quijotePages = [
       ],
       explanation:
         'Don Quijote invoca explícitamente a Briareo, el hecatónquiro mitológico que poseía cien brazos, justificando en su imaginario caballeresco el número desmesurado de miembros que parecían agitar los molinos.',
+    },
+    glossary: quijoteGlossary,
+  },
+  {
+    folio: 144,
+    chapter: 'PARTE PRIMERA • CAPÍTULO IX',
+    paragraphs: [
+      `Dejamos en la primera parte desta historia al valeroso vizcaíno y al famoso don Quijote con las espadas altas y desnudas, en guisa de descargar dos furibundos fendientes, tales, que si en lleno se acertaban, por lo menos se dividieran y partiran en dos mitades.`,
+      `Pero está el daño de todo esto que en este punto y término deja pendiente el autor desta historia esta batalla, disculpándose que no halló más escrito destas hazañas de don Quijote, de las que deja referidas.`,
+      `Con todo eso, el autor desta historia, puesto que con curiosidad y diligencia lo había buscado, no halló otro remedio sino dar crédito a los anales de la Mancha, que en su poder tenía, donde se declara cómo don Quijote, alzada la espada, dio tan gran golpe al vizcaíno, que a no volverse él con la rodela, fuera bastante a derribarle y quitarle la vida.`,
+    ],
+    trivia: {
+      question: '¿Qué recurso narrativo utiliza Cervantes al interrumpir la batalla y atribuir la continuación a unos “anales de la Mancha”?',
+      correctOption: 'C',
+      options: [
+        {
+          id: 'A',
+          text: 'Una digresión moral ajena por completo a la trama principal.',
+          hint: 'Lectura didáctica',
+        },
+        {
+          id: 'B',
+          text: 'Una repetición exacta del episodio de los molinos de viento.',
+          hint: 'Continuidad episódica',
+        },
+        {
+          id: 'C',
+          text: 'La ficción del manuscrito encontrado, que da verosimilitud y aplaza la resolución del combate.',
+          hint: 'Técnica del manuscrito hallado',
+        },
+      ],
+      explanation:
+        'Cervantes juega con los límites de la ficción: el autor se declara editor de un manuscrito ajeno. El aplazamiento no solo suspende la acción, sino que refuerza la verosimilitud del relato.',
     },
     glossary: quijoteGlossary,
   },

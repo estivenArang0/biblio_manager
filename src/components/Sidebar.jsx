@@ -12,6 +12,7 @@ const navItems = [
   { to: '/lectura', label: 'Lectura interactiva', icon: 'menu_book', roles: READERS },
   { to: '/recomendaciones', label: 'Recomendaciones', icon: 'psychology', roles: READERS },
   { to: '/historial', label: 'Historial', icon: 'history', roles: ALL },
+  { to: '/perfil', label: 'Mi perfil', icon: 'account_circle', roles: ALL },
   { to: '/reportes', label: 'Reportes', icon: 'bar_chart', roles: STAFF },
   { to: '/chat', label: 'Chat con administración', icon: 'forum', roles: READERS },
   { to: '/admin/chat', label: 'Chat · bandeja', icon: 'forum', roles: ['Administrador'] },

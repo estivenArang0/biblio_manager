@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import { spawn } from 'node:child_process'
 import fs from 'node:fs'
+import http from 'node:http'
 import os from 'node:os'
 import path from 'node:path'
 import test, { after, before } from 'node:test'
@@ -11,6 +12,8 @@ const port = 4123
 const base = `http://127.0.0.1:${port}/api`
 let dbFile = path.join(os.tmpdir(), `biblio-test-${process.pid}.db`)
 let server
+let googleMock
+const password = process.env.DEMO_PASSWORD || '123456'
 
 const tokens = {}
 const users = {}
@@ -55,7 +58,7 @@ async function waitForServer() {
 async function login(correo) {
   const response = await request('/auth/login', {
     method: 'POST',
-    body: { correo, password: '123456' },
+    body: { correo, password },
   })
   assert.equal(response.status, 200, `login ${correo}`)
   return response.body
@@ -64,9 +67,40 @@ async function login(correo) {
 before(async () => {
   // Archivo único por ejecución para evitar bloqueos de Windows entre corridas.
   dbFile = path.join(os.tmpdir(), `biblio-test-${process.pid}-${Date.now()}.db`)
+  googleMock = http.createServer((req, res) => {
+    const url = new URL(req.url, 'http://127.0.0.1')
+    if (!url.pathname.endsWith('/volumes')) {
+      res.writeHead(404).end()
+      return
+    }
+    res.writeHead(200, { 'Content-Type': 'application/json' })
+    res.end(
+      JSON.stringify({
+        items: [
+          {
+            volumeInfo: {
+              title: 'Don Quijote de la Mancha',
+              authors: ['Miguel de Cervantes Saavedra'],
+              categories: ['Ficción clásica'],
+              description: '<p>Novela clásica de la literatura española.</p>',
+              imageLinks: { thumbnail: 'http://books.google.com/portada.jpg' },
+              publishedDate: '2005-01-01',
+            },
+          },
+        ],
+      })
+    )
+  })
+  await new Promise((resolve) => googleMock.listen(4125, '127.0.0.1', resolve))
   server = spawn(process.execPath, ['server/index.js'], {
     cwd: root,
-    env: { ...process.env, PORT: String(port), BIBLIO_DB: dbFile },
+    env: {
+      ...process.env,
+      PORT: String(port),
+      BIBLIO_DB: dbFile,
+      DEMO_PASSWORD: password,
+      GOOGLE_BOOKS_URL: 'http://127.0.0.1:4125/books/v1/volumes',
+    },
     stdio: 'ignore',
   })
   await waitForServer()
@@ -99,6 +133,7 @@ after(async () => {
       /* Windows puede retener el archivo un instante; no afecta el resultado */
     }
   }
+  await new Promise((resolve) => googleMock.close(resolve))
 })
 
 test('autenticación: credenciales inválidas y acceso anónimo', async () => {
@@ -454,4 +489,209 @@ test('usuarios: el administrador crea cuentas y cambia roles', async () => {
     body: { nombre: 'Duplicado', correo, rol: 'Estudiante', password: 'abc123' },
   })
   assert.equal(duplicado.status, 409)
+})
+
+test('préstamo directo: busca, valida vencidos y descuenta ejemplares', async () => {
+  const options = await request(
+    '/loans/direct/options?userQuery=mateo&bookQuery=formas',
+    { token: tokens.bibliotecario }
+  )
+  assert.equal(options.status, 200)
+  const mateo = options.body.users.find((user) => user.id === users.mateo.id)
+  const book = options.body.books.find((item) => item.id === 'formas-tipograficas')
+  assert.ok(mateo)
+  assert.ok(book)
+  const copiesBefore = book.copiesAvailable
+  assert.ok(copiesBefore > 0)
+
+  const bloqueado = await request('/loans/direct', {
+    method: 'POST',
+    token: tokens.bibliotecario,
+    body: { userId: users.estudiante.id, bookId: 'formas-tipograficas', dueDate: '2099-01-01' },
+  })
+  assert.equal(bloqueado.status, 409)
+  assert.match(bloqueado.body.error, /vencido/i)
+
+  const hoy = new Date()
+  hoy.setDate(hoy.getDate() + 10)
+  const dueDate = `${hoy.getFullYear()}-${String(hoy.getMonth() + 1).padStart(2, '0')}-${String(hoy.getDate()).padStart(2, '0')}`
+
+  const directo = await request('/loans/direct', {
+    method: 'POST',
+    token: tokens.bibliotecario,
+    body: { userId: users.mateo.id, bookId: 'formas-tipograficas', dueDate },
+  })
+  assert.equal(directo.status, 201)
+  assert.equal(directo.body.loan.status, 'activo')
+  assert.equal(directo.body.loan.dueDate, dueDate)
+  assert.equal(directo.body.loan.user.id, users.mateo.id)
+
+  const mis = await request('/loans/mine', { token: tokens.mateo })
+  assert.ok(mis.body.loans.some((loan) => loan.id === directo.body.loan.id))
+
+  const lectura = await request('/reading/formas-tipograficas/page/0', { token: tokens.mateo })
+  assert.equal(lectura.status, 200)
+
+  const optionsAfter = await request(
+    '/loans/direct/options?userQuery=mateo&bookQuery=formas',
+    { token: tokens.bibliotecario }
+  )
+  const bookAfter = optionsAfter.body.books.find((item) => item.id === 'formas-tipograficas')
+  assert.equal(bookAfter.copiesAvailable, copiesBefore - 1)
+
+  const devuelto = await request(`/loans/${directo.body.loan.id}/return`, {
+    method: 'PATCH',
+    token: tokens.bibliotecario,
+  })
+  assert.equal(devuelto.status, 200)
+})
+
+test('préstamo directo: rechaza cuando no quedan ejemplares', async () => {
+  const libro = await request('/books', {
+    method: 'POST',
+    token: tokens.bibliotecario,
+    body: {
+      title: `Libro sin copias ${Date.now()}`,
+      author: 'Pruebas',
+      format: 'Digital',
+      copiesTotal: 1,
+    },
+  })
+  assert.equal(libro.status, 201)
+
+  const primero = await request('/loans/direct', {
+    method: 'POST',
+    token: tokens.bibliotecario,
+    body: { userId: users.mateo.id, bookId: libro.body.book.id, dueDate: '2099-01-01' },
+  })
+  assert.equal(primero.status, 201)
+
+  const segundo = await request('/loans/direct', {
+    method: 'POST',
+    token: tokens.bibliotecario,
+    body: { userId: users.docente.id, bookId: libro.body.book.id, dueDate: '2099-01-01' },
+  })
+  assert.equal(segundo.status, 409)
+  assert.match(segundo.body.error, /ejemplares/i)
+})
+
+test('Google Books: metadatos por ISBN con timeout y permisos', async () => {
+  const encontrado = await request('/books/isbn/9788437604947', {
+    token: tokens.bibliotecario,
+  })
+  assert.equal(encontrado.status, 200)
+  assert.equal(encontrado.body.found, true)
+  assert.match(encontrado.body.data.title, /Quijote/i)
+  assert.match(encontrado.body.data.image, /^https:/)
+  assert.ok(!encontrado.body.data.description.includes('<p>'))
+
+  const invalido = await request('/books/isbn/abc', { token: tokens.bibliotecario })
+  assert.equal(invalido.status, 400)
+
+  const estudiante = await request('/books/isbn/9788437604947', {
+    token: tokens.estudiante,
+  })
+  assert.equal(estudiante.status, 403)
+})
+
+test('perfil: cambio de contraseña con verificación y mínimo 8', async () => {
+  const correo = `clave.${Date.now()}@tdea.edu.co`
+  const creado = await request('/users', {
+    method: 'POST',
+    token: tokens.admin,
+    body: { nombre: 'Cambio Clave', correo, rol: 'Estudiante', password: 'Inicial123' },
+  })
+  assert.equal(creado.status, 201)
+
+  const sesion = await request('/auth/login', {
+    method: 'POST',
+    body: { correo, password: 'Inicial123' },
+  })
+  assert.equal(sesion.status, 200)
+
+  const incorrecta = await request('/auth/password', {
+    method: 'PATCH',
+    token: sesion.body.token,
+    body: { currentPassword: 'otra', newPassword: 'NuevaClave2026' },
+  })
+  assert.equal(incorrecta.status, 400)
+
+  const corta = await request('/auth/password', {
+    method: 'PATCH',
+    token: sesion.body.token,
+    body: { currentPassword: 'Inicial123', newPassword: 'corta' },
+  })
+  assert.equal(corta.status, 400)
+
+  const ok = await request('/auth/password', {
+    method: 'PATCH',
+    token: sesion.body.token,
+    body: { currentPassword: 'Inicial123', newPassword: 'NuevaClave2026' },
+  })
+  assert.equal(ok.status, 200)
+
+  const anterior = await request('/auth/login', {
+    method: 'POST',
+    body: { correo, password: 'Inicial123' },
+  })
+  assert.equal(anterior.status, 401)
+
+  const nueva = await request('/auth/login', {
+    method: 'POST',
+    body: { correo, password: 'NuevaClave2026' },
+  })
+  assert.equal(nueva.status, 200)
+})
+
+test('contenido: el bibliotecario edita bloques y trivias; el lector los recibe', async () => {
+  const contenido = await request('/books/quijote/content', {
+    token: tokens.bibliotecario,
+  })
+  assert.equal(contenido.status, 200)
+  assert.ok(contenido.body.blocks.length >= 3)
+
+  const guardado = await request('/books/quijote/content', {
+    method: 'PUT',
+    token: tokens.bibliotecario,
+    body: {
+      blocks: [
+        {
+          chapter: 'BLOQUE UNO',
+          text: 'Primer párrafo del bloque uno.\n\nSegundo párrafo del bloque uno.',
+          question: '¿Qué se narra en el bloque uno?',
+          options: ['Una aventura', 'Una receta', 'Un tratado'],
+          correctOption: 'A',
+          explanation: 'Se narra una aventura.',
+        },
+        {
+          chapter: 'BLOQUE DOS',
+          text: 'Texto del segundo bloque.',
+          question: '',
+          options: [],
+        },
+        {
+          chapter: 'BLOQUE TRES',
+          text: 'Texto del tercer bloque.',
+          question: 'Reflexiona sobre el final del texto.',
+          options: [],
+        },
+      ],
+    },
+  })
+  assert.equal(guardado.status, 200)
+  assert.equal(guardado.body.total, 3)
+
+  const estudiante = await request('/books/quijote/content', {
+    token: tokens.estudiante,
+  })
+  assert.equal(estudiante.status, 403)
+
+  const pagina = await request('/reading/quijote/page/2', { token: tokens.estudiante })
+  assert.equal(pagina.status, 200)
+  assert.equal(pagina.body.chapter, 'BLOQUE TRES')
+  assert.equal(pagina.body.trivia.type, 'reflection')
+
+  const primera = await request('/reading/quijote/page/0', { token: tokens.estudiante })
+  assert.equal(primera.body.paragraphs.length, 2)
+  assert.equal(primera.body.trivia.correctOption, 'A')
 })

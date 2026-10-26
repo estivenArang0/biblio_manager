@@ -20,6 +20,7 @@ const libroVacio = {
   format: 'Digital',
   image: IMAGEN_POR_DEFECTO,
   description: '',
+  copiesTotal: 3,
 }
 
 function Catalogo() {
@@ -56,6 +57,7 @@ function Catalogo() {
   const [savingBook, setSavingBook] = useState(false)
   const [isEditModalOpen, setIsEditModalOpen] = useState(false)
   const [bookToEdit, setBookToEdit] = useState(null)
+  const [contentBook, setContentBook] = useState(null)
 
   const cargarLibros = useCallback(async () => {
     try {
@@ -215,6 +217,7 @@ function Catalogo() {
       format: book.format || 'Digital',
       image: book.image || '',
       description: book.description || '',
+      copiesTotal: book.copiesTotal || 3,
     })
     setIsEditModalOpen(true)
   }
@@ -432,6 +435,7 @@ function Catalogo() {
               key={book.id}
               book={book}
               onEdit={handleOpenEditModal}
+              onContent={setContentBook}
               onRequest={handleRequest}
               requesting={requestingId === book.id}
               esStaff={esStaff}
@@ -549,11 +553,57 @@ function Catalogo() {
           submitLabel="Actualizar cambios"
         />
       )}
+
+      {contentBook && (
+        <ContentEditor
+          book={contentBook}
+          onClose={() => setContentBook(null)}
+          onSaved={async () => {
+            await cargarLibros()
+          }}
+        />
+      )}
     </div>
   )
 }
 
 function BookModal({ title, icon, book, setBook, onSubmit, onClose, saving, submitLabel }) {
+  const [lookingUp, setLookingUp] = useState(false)
+  const [lookupMessage, setLookupMessage] = useState('')
+
+  const buscarDatos = async () => {
+    const isbn = String(book.isbn || '').replace(/[-\s]/g, '')
+    if (!isbn) {
+      setLookupMessage('Escribe un ISBN para buscar en Google Books.')
+      return
+    }
+    setLookingUp(true)
+    setLookupMessage('Buscando en Google Books…')
+    try {
+      const response = await api.googleBooksByIsbn(isbn)
+      if (!response.found) {
+        setLookupMessage('No se encontraron datos, escríbelos manualmente.')
+        return
+      }
+      const data = response.data
+      setBook((current) => ({
+        ...current,
+        isbn,
+        title: data.title || current.title,
+        author: data.author || current.author,
+        genre: data.genre || current.genre,
+        description: data.description || current.description,
+        image: data.image || current.image,
+        year: data.year || current.year,
+      }))
+      setLookupMessage('Datos encontrados. Puedes corregirlos antes de guardar.')
+    } catch {
+      setLookupMessage('No se encontraron datos, escríbelos manualmente.')
+    } finally {
+      setLookingUp(false)
+    }
+  }
+
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-primary/40 backdrop-blur-sm p-4">
       <div className="bg-surface-container-lowest rounded-xl p-5 sm:p-6 max-w-lg w-full max-h-[90vh] overflow-y-auto shadow-2xl flex flex-col gap-4 border border-outline-variant/30">
@@ -645,15 +695,54 @@ function BookModal({ title, icon, book, setBook, onSubmit, onClose, saving, subm
             </div>
           </div>
 
+          <div className="grid grid-cols-1 sm:grid-cols-[1fr_auto] gap-2 items-end">
+            <div>
+              <label className="block text-xs font-semibold text-on-surface mb-1" htmlFor="book-isbn">
+                ISBN
+              </label>
+              <input
+                id="book-isbn"
+                value={book.isbn}
+                onChange={(event) => setBook({ ...book, isbn: event.target.value })}
+                placeholder="978-..."
+                className="w-full min-h-[44px] px-3 py-2 bg-surface-container-low text-on-surface text-sm rounded-lg focus:outline-none"
+              />
+            </div>
+            <button
+              type="button"
+              data-testid="buscar-isbn"
+              onClick={buscarDatos}
+              disabled={lookingUp}
+              className="min-h-[44px] px-3 rounded-lg bg-surface-container border border-outline-variant/30 text-on-surface text-xs font-semibold disabled:opacity-60"
+            >
+              {lookingUp ? 'Buscando…' : 'Buscar datos'}
+            </button>
+          </div>
+          {lookupMessage && (
+            <p
+              className={`text-[11px] rounded-lg px-2.5 py-2 ${
+                lookupMessage.startsWith('Datos encontrados')
+                  ? 'bg-green-50 text-green-900 border border-green-200'
+                  : 'bg-surface-container-low text-on-surface-variant'
+              }`}
+            >
+              {lookupMessage}
+            </p>
+          )}
+
           <div>
-            <label className="block text-xs font-semibold text-on-surface mb-1" htmlFor="book-isbn">
-              ISBN
+            <label className="block text-xs font-semibold text-on-surface mb-1" htmlFor="book-copies">
+              Ejemplares disponibles para préstamo
             </label>
             <input
-              id="book-isbn"
-              value={book.isbn}
-              onChange={(event) => setBook({ ...book, isbn: event.target.value })}
-              placeholder="978-..."
+              id="book-copies"
+              type="number"
+              min={1}
+              max={999}
+              value={book.copiesTotal ?? 3}
+              onChange={(event) =>
+                setBook({ ...book, copiesTotal: Math.max(1, Number(event.target.value) || 1) })
+              }
               className="w-full min-h-[44px] px-3 py-2 bg-surface-container-low text-on-surface text-sm rounded-lg focus:outline-none"
             />
           </div>
@@ -702,6 +791,259 @@ function BookModal({ title, icon, book, setBook, onSubmit, onClose, saving, subm
             </button>
           </div>
         </form>
+      </div>
+    </div>
+  )
+}
+
+function bloqueVacio() {
+  return {
+    chapter: '',
+    text: '',
+    question: '',
+    options: ['', '', ''],
+    correctOption: 'A',
+    explanation: '',
+  }
+}
+
+function opcionesDe(block) {
+  const options = Array.isArray(block.options) ? [...block.options] : []
+  while (options.length < 3) options.push('')
+  return options.slice(0, 3)
+}
+
+function ContentEditor({ book, onClose, onSaved }) {
+  const [blocks, setBlocks] = useState([])
+  const [loading, setLoading] = useState(true)
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState('')
+  const [success, setSuccess] = useState('')
+
+  useEffect(() => {
+    let alive = true
+    api
+      .bookContent(book.id)
+      .then((data) => {
+        if (!alive) return
+        const loaded = data.blocks.length
+          ? data.blocks.map((block) => ({ ...block, options: opcionesDe(block) }))
+          : [bloqueVacio()]
+        setBlocks(loaded)
+      })
+      .catch((err) => {
+        if (alive) setError(err.message || 'No se pudo cargar el contenido.')
+      })
+      .finally(() => {
+        if (alive) setLoading(false)
+      })
+    return () => {
+      alive = false
+    }
+  }, [book.id])
+
+  const cambiar = (index, field, value) => {
+    setBlocks((current) =>
+      current.map((block, position) => (position === index ? { ...block, [field]: value } : block))
+    )
+  }
+
+  const cambiarOpcion = (index, optionIndex, value) => {
+    setBlocks((current) =>
+      current.map((block, position) => {
+        if (position !== index) return block
+        const options = [...block.options]
+        options[optionIndex] = value
+        return { ...block, options }
+      })
+    )
+  }
+
+  const guardar = async () => {
+    setError('')
+    setSuccess('')
+    for (let index = 0; index < blocks.length; index += 1) {
+      const block = blocks[index]
+      if (!block.text.trim()) {
+        setError(`El bloque ${index + 1} necesita texto.`)
+        return
+      }
+      const filledOptions = block.options.filter((option) => option.trim())
+      if (
+        block.question.trim() &&
+        filledOptions.length > 0 &&
+        filledOptions.length < 3
+      ) {
+        setError(`Completa las 3 opciones del bloque ${index + 1} o deja la pregunta sin opciones (reflexión).`)
+        return
+      }
+    }
+    setSaving(true)
+    try {
+      const payload = blocks.map((block) => ({
+        chapter: block.chapter,
+        text: block.text,
+        question: block.question,
+        options: block.options,
+        correctOption: block.correctOption,
+        explanation: block.explanation,
+      }))
+      await api.updateBookContent(book.id, payload)
+      setSuccess('Contenido guardado. El visor ya usa estos bloques.')
+      await onSaved?.()
+    } catch (err) {
+      setError(err.message || 'No se pudo guardar el contenido.')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 bg-primary/40 backdrop-blur-sm flex items-center justify-center p-3 sm:p-4">
+      <div
+        data-testid="content-editor"
+        className="bg-surface-container-lowest rounded-xl border border-outline-variant/30 shadow-2xl w-full max-w-3xl max-h-[92vh] overflow-y-auto p-4 sm:p-5 flex flex-col gap-3"
+      >
+        <div className="flex items-start justify-between gap-2">
+          <div className="min-w-0">
+            <h2 className="font-title-lg font-bold text-on-surface truncate">Contenido de lectura</h2>
+            <p className="text-[11px] text-on-surface-variant truncate">
+              {book.title} · cada bloque es una página del visor. Separa párrafos con una línea en blanco.
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            aria-label="Cerrar"
+            className="w-11 h-11 -mr-2 flex items-center justify-center text-on-surface-variant"
+          >
+            <span className="material-symbols-outlined">close</span>
+          </button>
+        </div>
+
+        {loading ? (
+          <LoadingScreen label="Cargando contenido…" />
+        ) : (
+          <>
+            {error && (
+              <div className="p-2.5 rounded-lg bg-error-container text-on-error-container text-xs">{error}</div>
+            )}
+            {success && (
+              <div className="p-2.5 rounded-lg bg-green-50 text-green-900 border border-green-200 text-xs">
+                {success}
+              </div>
+            )}
+
+            <div className="flex flex-col gap-3">
+              {blocks.map((block, index) => (
+                <section
+                  key={index}
+                  className="rounded-xl border border-outline-variant/25 bg-surface-container-low/40 p-3 flex flex-col gap-2"
+                >
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-xs font-bold text-secondary">Bloque {index + 1}</span>
+                    <button
+                      type="button"
+                      onClick={() => setBlocks((current) => current.filter((_, position) => position !== index))}
+                      disabled={blocks.length === 1}
+                      className="min-h-[36px] px-2 rounded-lg bg-surface-container text-on-surface-variant text-[11px] disabled:opacity-40"
+                    >
+                      Quitar
+                    </button>
+                  </div>
+                  <input
+                    value={block.chapter}
+                    onChange={(event) => cambiar(index, 'chapter', event.target.value)}
+                    placeholder="Título o capítulo del bloque"
+                    className="min-h-[44px] px-3 rounded-lg bg-surface-container-low text-on-surface text-xs focus:outline-none"
+                  />
+                  <textarea
+                    rows={5}
+                    value={block.text}
+                    onChange={(event) => cambiar(index, 'text', event.target.value)}
+                    placeholder="Pega o escribe el texto de este bloque…"
+                    data-testid={`bloque-${index}`}
+                    className="px-3 py-2 rounded-lg bg-surface-container-low text-on-surface text-xs focus:outline-none resize-y"
+                  />
+                  <details className="rounded-lg bg-surface-container-low px-3 py-2">
+                    <summary className="text-[11px] font-semibold text-on-surface cursor-pointer">
+                      Trivia o pregunta de reflexión (opcional)
+                    </summary>
+                    <div className="flex flex-col gap-2 pt-2">
+                      <input
+                        value={block.question}
+                        onChange={(event) => cambiar(index, 'question', event.target.value)}
+                        placeholder="Pregunta del bloque"
+                        className="min-h-[44px] px-3 rounded-lg bg-surface-container-lowest text-on-surface text-xs focus:outline-none"
+                      />
+                      <p className="text-[10px] text-on-surface-variant">
+                        Si completas las 3 opciones será trivia con respuesta correcta. Si las dejas vacías,
+                        será una pregunta de reflexión.
+                      </p>
+                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                        {block.options.map((option, optionIndex) => (
+                          <input
+                            key={optionIndex}
+                            value={option}
+                            onChange={(event) => cambiarOpcion(index, optionIndex, event.target.value)}
+                            placeholder={`Opción ${String.fromCharCode(65 + optionIndex)}`}
+                            className="min-h-[44px] px-3 rounded-lg bg-surface-container-lowest text-on-surface text-xs focus:outline-none"
+                          />
+                        ))}
+                      </div>
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                        <select
+                          value={block.correctOption}
+                          onChange={(event) => cambiar(index, 'correctOption', event.target.value)}
+                          className="min-h-[44px] px-3 rounded-lg bg-surface-container-lowest text-on-surface text-xs"
+                        >
+                          <option value="A">Correcta: A</option>
+                          <option value="B">Correcta: B</option>
+                          <option value="C">Correcta: C</option>
+                        </select>
+                        <input
+                          value={block.explanation}
+                          onChange={(event) => cambiar(index, 'explanation', event.target.value)}
+                          placeholder="Retroalimentación (opcional)"
+                          className="min-h-[44px] px-3 rounded-lg bg-surface-container-lowest text-on-surface text-xs focus:outline-none"
+                        />
+                      </div>
+                    </div>
+                  </details>
+                </section>
+              ))}
+            </div>
+
+            <button
+              type="button"
+              data-testid="content-add"
+              onClick={() => setBlocks((current) => [...current, bloqueVacio()])}
+              disabled={blocks.length >= 60}
+              className="min-h-[44px] rounded-lg border border-dashed border-outline-variant text-on-surface-variant text-xs font-semibold disabled:opacity-50"
+            >
+              + Añadir bloque
+            </button>
+
+            <div className="flex justify-end gap-2 pt-2 border-t border-outline-variant/20">
+              <button
+                type="button"
+                onClick={onClose}
+                className="min-h-[44px] px-4 rounded-lg bg-surface-container-high text-on-surface text-xs"
+              >
+                Cerrar
+              </button>
+              <button
+                type="button"
+                data-testid="content-save"
+                onClick={guardar}
+                disabled={saving}
+                className="min-h-[44px] px-4 rounded-lg bg-secondary text-on-secondary text-xs font-bold disabled:opacity-60"
+              >
+                {saving ? 'Guardando…' : 'Guardar contenido'}
+              </button>
+            </div>
+          </>
+        )}
       </div>
     </div>
   )

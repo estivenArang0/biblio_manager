@@ -38,11 +38,12 @@ Abrir <http://localhost:5173>. La base se crea sola en `server/data/biblio.db` y
 | `npm test` | Pruebas del backend (permisos, lectura, subrayados, chat, reportes). |
 | `npm run preview` | Sirve el build (sin proxy `/api`; usar `npm run dev` para probar). |
 
-Variables opcionales en `.env`: `PORT` y `BIBLIO_DB` (ver `.env.example`).
+Variables opcionales en `.env`: `PORT`, `BIBLIO_DB`, `DEMO_PASSWORD` y `SESSION_IDLE_MINUTES` (ver `.env.example`).
 
 ## Usuarios de demostración
 
-Contraseña para todos: **`123456`**
+Contraseña por defecto del seed: **`123456`**. Se puede cambiar antes de crear la base con
+`DEMO_PASSWORD=...`; después, cada usuario puede cambiarla desde **Mi perfil**.
 
 | Rol | Correo | Nombre |
 | --- | --- | --- |
@@ -61,13 +62,14 @@ Contraseña para todos: **`123456`**
 | --- | --- | --- | --- |
 | Catálogo | Ver y solicitar | Ver, registrar y editar | Ver, registrar y editar |
 | Mis préstamos | Sí | No | No |
-| Préstamos y devoluciones | No | Aprobar y devolver | Aprobar y devolver |
+| Préstamos y devoluciones | No | Aprobar, devolver y préstamo directo | Aprobar, devolver y préstamo directo |
 | Lectura interactiva | Solo con préstamo activo | No | No |
 | Recomendaciones | Sí | No | No |
 | Historial | Solo el propio | Global | Global |
 | Reportes + CSV | No | Sí | Sí |
 | Chat con administración | Sí | No | Atiende la bandeja |
 | Usuarios y roles | No | No | Sí |
+| Mi perfil / cambiar contraseña | Sí | Sí | Sí |
 
 Todas las rutas del API validan la sesión y el rol en el **servidor**. Si se escribe una URL prohibida en el navegador se muestra **Acceso denegado (403)**; el API responde igualmente `403`.
 
@@ -84,6 +86,23 @@ Todas las rutas del API validan la sesión y el rol en el **servidor**. Si se es
 - Préstamos vencidos en rojo y sin acceso a lectura.
 - Solicitudes pendientes separadas.
 
+### Préstamo directo en mostrador
+- Botón **Nuevo préstamo** en “Préstamos y devoluciones” (Bibliotecario/Administrador).
+- Búsqueda de usuario por nombre o correo y de libro por título o ISBN.
+- Fecha límite editable (15 días por defecto).
+- El backend valida que queden ejemplares y que el usuario no tenga préstamos vencidos; descuenta el ejemplar y registra el préstamo en el historial.
+
+### Google Books por ISBN
+- En “Registrar/editar libro”, el botón **Buscar datos** consulta `https://www.googleapis.com/books/v1/volumes?q=isbn:...`.
+- Rellena título, autor, género, descripción y portada; el bibliotecario puede corregir todo antes de guardar.
+- Timeout de 5 segundos. Si no hay datos, cuota agotada o error de red, muestra **“No se encontraron datos, escríbelos manualmente.”** y el formulario sigue funcionando.
+
+### Contenido de lectura editable
+- En el catálogo, el botón con ícono de libro (staff) abre **Contenido de lectura**.
+- Cada bloque es una página: título/capítulo, texto (párrafos separados por línea en blanco) y trivia o pregunta de reflexión.
+- Si se completan las 3 opciones hay trivia con respuesta correcta; si se dejan vacías, el visor muestra un campo de reflexión.
+- Hay dos libros de ejemplo con 3 bloques y trivia: **Don Quijote** y **Tratado de las Formas Tipográficas**.
+
 ### Lectura interactiva protegida
 - Listado previo de libros prestados digitales activos.
 - El catálogo no muestra etiquetas de "prestado" ni enlaces de lectura.
@@ -92,7 +111,7 @@ Todas las rutas del API validan la sesión y el rol en el **servidor**. Si se es
 - Bloqueo de copiar, cortar, arrastrar, clic derecho y atajos `Ctrl+C`, `Ctrl+X`, `Ctrl+P`, `Ctrl+S`, `Ctrl+U`.
 - Contenido oculto al imprimir (`@media print`).
 - Marca de agua tenue con nombre y correo.
-- Cierre de sesión automático tras **30 minutos sin actividad**.
+- Cierre de sesión automático tras **30 minutos sin actividad** (servidor + respaldo en el navegador).
 - Apertura y cierre se registran en el historial.
 
 ### Subrayar y anotar
@@ -105,6 +124,11 @@ Todas las rutas del API validan la sesión y el rol en el **servidor**. Si se es
 - Pestañas: estudiantes, docentes y todos los usuarios.
 - Filtros por fecha y estado; totales de total, activos, vencidos y devueltos.
 - Exportación CSV desde el API (solo Bibliotecario/Administrador).
+
+### Sesión y perfil
+- Cada petición autenticada actualiza `last_seen_at`; si pasan más de 30 minutos, el API borra la sesión y responde `401` con `code: SESSION_IDLE`.
+- El frontend cierra sesión y muestra **“Tu sesión venció por inactividad”**.
+- **Mi perfil** permite cambiar la contraseña (actual + nueva de mínimo 8 caracteres, guardada con `scrypt`).
 
 ### Chat interno
 - Ventana usuario ↔ administrador con polling cada 5 segundos.
@@ -140,7 +164,7 @@ scripts/dev.mjs Levanta API + Vite en un comando
 ## Pruebas
 
 ```bash
-npm test        # 11 pruebas de integración del backend
+npm test        # 17 pruebas de integración del backend
 npm run lint
 npm run build
 ```
@@ -151,7 +175,7 @@ La verificación de interfaz se hizo con Chrome headless sobre el flujo completo
 
 - No se usa Firebase: la seguridad y la persistencia están en el API propio para poder validar permisos y contenido en el servidor.
 - El contenido de lectura es texto de dominio público / de ejemplo almacenado en la base; no hay PDF ni archivos servidos como estáticos.
-- El cierre por inactividad se controla en el cliente (30 min) y la sesión del API expira a las 12 h. La lectura valida el préstamo en cada página.
+- El cierre por inactividad se controla en el servidor (30 min por defecto, configurable con `SESSION_IDLE_MINUTES`); el navegador mantiene un temporizador de respaldo. La sesión absoluta expira a las 12 h.
 - El chat es de texto plano, sin adjuntos ni websockets.
 - El administrador no entra a "Mis préstamos" ni a lectura porque esas vistas exigen un préstamo personal; sí puede revisar y gestionar todo lo demás.
-- No se implementó edición de perfil ni recuperación de contraseña; los usuarios los crea el administrador.
+- No se implementó recuperación de contraseña por correo ni edición de datos del perfil; sí el cambio de contraseña autenticado. Los usuarios los crea el administrador.

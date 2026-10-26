@@ -18,6 +18,9 @@ const db = getDb()
 const SESSION_HOURS = 12
 const MAX_BODY_BYTES = 512 * 1024
 const HIGHLIGHT_COLORS = ['amarillo', 'verde', 'azul']
+const idleSeconds = Number(process.env.SESSION_IDLE_SECONDS || 0)
+const idleMinutes = Number(process.env.SESSION_IDLE_MINUTES || 30)
+const SESSION_IDLE_MS = idleSeconds > 0 ? idleSeconds * 1000 : idleMinutes * 60 * 1000
 
 /* ------------------------------------------------------------------ *
  * Utilidades HTTP
@@ -92,16 +95,23 @@ function sessionUser(req) {
   if (!token) return null
   const row = db
     .prepare(
-      `SELECT u.id, u.nombre, u.correo, u.rol, s.expires_at
+      `SELECT u.id, u.nombre, u.correo, u.rol, s.expires_at, s.last_seen_at, s.created_at
          FROM sessions s JOIN users u ON u.id = s.user_id
         WHERE s.token = ?`
     )
     .get(token)
   if (!row) return null
-  if (row.expires_at <= nowISO()) {
+  const now = Date.now()
+  const lastSeen = new Date(row.last_seen_at || row.created_at).getTime()
+  if (
+    row.expires_at <= nowISO() ||
+    !Number.isFinite(lastSeen) ||
+    now - lastSeen > SESSION_IDLE_MS
+  ) {
     db.prepare('DELETE FROM sessions WHERE token = ?').run(token)
-    return null
+    throw httpError(401, 'Tu sesión venció por inactividad.', { code: 'SESSION_IDLE' })
   }
+  db.prepare('UPDATE sessions SET last_seen_at = ? WHERE token = ?').run(nowISO(), token)
   return { id: row.id, nombre: row.nombre, correo: row.correo, rol: row.rol, token }
 }
 
@@ -115,8 +125,8 @@ function createSession(userId) {
   const expires = new Date(Date.now() + SESSION_HOURS * 3600 * 1000).toISOString()
   db.prepare('DELETE FROM sessions WHERE expires_at <= ?').run(created)
   db.prepare(
-    'INSERT INTO sessions (token, user_id, created_at, expires_at) VALUES (?, ?, ?, ?)'
-  ).run(token, userId, created, expires)
+    'INSERT INTO sessions (token, user_id, created_at, last_seen_at, expires_at) VALUES (?, ?, ?, ?, ?)'
+  ).run(token, userId, created, created, expires)
   return token
 }
 
@@ -134,6 +144,7 @@ function parsePages(row) {
 }
 
 function availabilityLabel(book) {
+  if (Number(book.copies_available) <= 0) return 'Sin ejemplares disponibles'
   if (book.digital && book.physical) return 'Digital y físico'
   if (book.digital) return 'Préstamo digital'
   return 'Físico · retiro en biblioteca'
@@ -207,6 +218,8 @@ function bookDto(row, user) {
     physical: Boolean(row.physical),
     image: row.image,
     description: row.description,
+    copiesTotal: Number(row.copies_total ?? 0),
+    copiesAvailable: Number(row.copies_available ?? 0),
     pageCount: parsePages(row).length,
     availabilityLabel: availabilityLabel(row),
     myLoan: user && READERS.includes(user.rol) ? myLoanFor(user.id, row.id) : null,
@@ -231,6 +244,103 @@ function requireReadingAccess(user, bookId) {
     throw httpError(403, 'No tienes un préstamo activo y vigente de este libro.')
   }
   return { book, loan }
+}
+
+function withTransaction(callback) {
+  db.exec('BEGIN IMMEDIATE')
+  try {
+    const result = callback()
+    db.exec('COMMIT')
+    return result
+  } catch (error) {
+    db.exec('ROLLBACK')
+    throw error
+  }
+}
+
+function takeCopy(bookId) {
+  const info = db
+    .prepare('UPDATE books SET copies_available = copies_available - 1 WHERE id = ? AND copies_available > 0')
+    .run(bookId)
+  if (info.changes === 0) {
+    throw httpError(409, 'No hay ejemplares disponibles de este libro.')
+  }
+}
+
+function releaseCopy(bookId) {
+  db.prepare(
+    'UPDATE books SET copies_available = MIN(copies_total, copies_available + 1) WHERE id = ?'
+  ).run(bookId)
+}
+
+function overdueLoansFor(userId) {
+  return db
+    .prepare(
+      `SELECT id FROM loans
+        WHERE user_id = ? AND status <> 'pendiente' AND returned_at IS NULL AND due_date < ?`
+    )
+    .all(userId, ymd()).length
+}
+
+function hasOpenLoan(userId, bookId) {
+  const rows = db
+    .prepare('SELECT * FROM loans WHERE user_id = ? AND book_id = ? ORDER BY id DESC')
+    .all(userId, bookId)
+  return rows.find((row) => ['activo', 'vencido', 'pendiente'].includes(loanStatus(row))) || null
+}
+
+function pageToBlock(page) {
+  const trivia = page?.trivia || {}
+  return {
+    chapter: page?.chapter || '',
+    text: Array.isArray(page?.paragraphs) ? page.paragraphs.join('\n\n') : '',
+    question: trivia.question || '',
+    options: Array.isArray(trivia.options) ? trivia.options.map((option) => option.text) : [],
+    correctOption: trivia.correctOption || 'A',
+    explanation: trivia.explanation || '',
+  }
+}
+
+function blocksToPages(blocks, previousPages = []) {
+  return blocks.map((block, index) => {
+    const paragraphs = String(block.text || '')
+      .split(/\n\s*\n/)
+      .map((paragraph) => paragraph.trim())
+      .filter(Boolean)
+    const options = (block.options || [])
+      .map((text, optionIndex) => ({
+        id: String.fromCharCode(65 + optionIndex),
+        text: String(text || '').trim(),
+        hint: '',
+      }))
+      .filter((option) => option.text)
+    const question = String(block.question || '').trim()
+    const trivia =
+      question && options.length >= 2
+        ? {
+            question,
+            correctOption: String(block.correctOption || 'A').toUpperCase(),
+            options,
+            explanation: String(block.explanation || '').trim(),
+          }
+        : question
+          ? { type: 'reflection', question, explanation: String(block.explanation || '').trim() }
+          : null
+    return {
+      folio: index + 1,
+      chapter: String(block.chapter || `BLOQUE ${index + 1}`).trim(),
+      paragraphs,
+      trivia,
+      glossary: previousPages[index]?.glossary || [],
+    }
+  })
+}
+
+function stripHtml(value) {
+  return String(value || '')
+    .replace(/<[^>]+>/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
 }
 
 function highlightDto(row) {
@@ -413,6 +523,25 @@ route('POST', 'auth/logout', null, ({ user }) => {
 
 route('GET', 'auth/me', null, ({ user }) => ({ user: publicUser(user) }))
 
+route('PATCH', 'auth/password', null, ({ body, user }) => {
+  const currentPassword = String(body.currentPassword || '')
+  const newPassword = String(body.newPassword || '')
+  const row = db.prepare('SELECT * FROM users WHERE id = ?').get(user.id)
+  if (!row || !verifyPassword(currentPassword, row.password_hash)) {
+    throw httpError(400, 'La contraseña actual no es correcta.')
+  }
+  if (newPassword.length < 8) {
+    throw httpError(400, 'La nueva contraseña debe tener al menos 8 caracteres.')
+  }
+  if (newPassword === currentPassword) {
+    throw httpError(400, 'La nueva contraseña debe ser diferente a la actual.')
+  }
+  db.prepare('UPDATE users SET password_hash = ? WHERE id = ?').run(hashPassword(newPassword), user.id)
+  // Se invalidan las demás sesiones; la actual se conserva.
+  db.prepare('DELETE FROM sessions WHERE user_id = ? AND token <> ?').run(user.id, user.token)
+  return { ok: true }
+})
+
 /* --- Catálogo ------------------------------------------------------ */
 
 route('GET', 'books', null, ({ user }) => {
@@ -425,6 +554,7 @@ route('POST', 'books', STAFF, ({ body, user }) => {
   const author = cleanText(body.author, 160, 'autor')
   const format = String(body.format || 'Digital').trim()
   const flags = deriveFlags(format)
+  const copiesTotal = Math.max(1, Math.min(999, Number(body.copiesTotal) || 3))
   const baseId = slugify(title) || 'libro'
   let id = baseId
   let suffix = 1
@@ -448,11 +578,12 @@ route('POST', 'books', STAFF, ({ body, user }) => {
       String(body.image || '').trim() ||
       'https://images.unsplash.com/photo-1544716278-ca5e3f4abd8c?auto=format&fit=crop&q=80&w=600',
     description: String(body.description || '').trim().slice(0, 600),
+    copiesTotal,
   }
   const pages = buildGenericPages(book)
   db.prepare(
-    `INSERT INTO books (id, title, author, tag, genre, isbn, signature, year, format, digital, physical, image, description, pages_json, created_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    `INSERT INTO books (id, title, author, tag, genre, isbn, signature, year, format, digital, physical, image, description, copies_total, copies_available, pages_json, created_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
   ).run(
     book.id,
     book.title,
@@ -467,6 +598,8 @@ route('POST', 'books', STAFF, ({ body, user }) => {
     book.physical,
     book.image,
     book.description,
+    book.copiesTotal,
+    book.copiesTotal,
     JSON.stringify(pages),
     nowISO()
   )
@@ -481,9 +614,22 @@ route('PUT', 'books/:id', STAFF, ({ params, body, user }) => {
   const author = cleanText(body.author ?? existing.author, 160, 'autor')
   const format = String(body.format ?? existing.format).trim()
   const flags = deriveFlags(format)
+  const activeLoans = db
+    .prepare(
+      `SELECT COUNT(*) AS total FROM loans
+        WHERE book_id = ? AND returned_at IS NULL AND status <> 'pendiente'`
+    )
+    .get(existing.id).total
+  const copiesTotal =
+    body.copiesTotal === undefined
+      ? existing.copies_total
+      : Math.max(activeLoans, Math.min(999, Number(body.copiesTotal) || existing.copies_total))
+  const copiesAvailable =
+    body.copiesTotal === undefined ? existing.copies_available : copiesTotal - activeLoans
   db.prepare(
     `UPDATE books SET title = ?, author = ?, tag = ?, genre = ?, isbn = ?, signature = ?,
-            year = ?, format = ?, digital = ?, physical = ?, image = ?, description = ?
+            year = ?, format = ?, digital = ?, physical = ?, image = ?, description = ?,
+            copies_total = ?, copies_available = ?
       WHERE id = ?`
   ).run(
     title,
@@ -498,10 +644,88 @@ route('PUT', 'books/:id', STAFF, ({ params, body, user }) => {
     flags.physical,
     String(body.image ?? existing.image ?? '').slice(0, 500),
     String(body.description ?? existing.description ?? '').slice(0, 600),
+    copiesTotal,
+    Math.max(0, copiesAvailable),
     existing.id
   )
   const updated = db.prepare('SELECT * FROM books WHERE id = ?').get(existing.id)
   return { book: bookDto(updated, user) }
+})
+
+/* --- Metadatos de Google Books y contenido de lectura -------------- */
+
+const GOOGLE_BOOKS_URL =
+  process.env.GOOGLE_BOOKS_URL || 'https://www.googleapis.com/books/v1/volumes'
+
+route('GET', 'books/isbn/:isbn', STAFF, async ({ params }) => {
+  const isbn = String(params.isbn || '').replace(/[-\s]/g, '').toUpperCase()
+  if (!/^\d{9}[\dX]$/.test(isbn) && !/^\d{13}$/.test(isbn)) {
+    throw httpError(400, 'El ISBN debe tener 10 o 13 caracteres.')
+  }
+  try {
+    const response = await fetch(`${GOOGLE_BOOKS_URL}?q=isbn:${encodeURIComponent(isbn)}`, {
+      signal: AbortSignal.timeout(5000),
+      headers: { Accept: 'application/json' },
+    })
+    if (!response.ok) return { found: false }
+    const payload = await response.json()
+    const info = payload?.items?.[0]?.volumeInfo
+    if (!info) return { found: false }
+    return {
+      found: true,
+      data: {
+        isbn,
+        title: String(info.title || '').slice(0, 200),
+        author: Array.isArray(info.authors) ? info.authors.join(', ').slice(0, 160) : '',
+        genre: Array.isArray(info.categories) ? info.categories.join(' / ').slice(0, 80) : '',
+        description: stripHtml(info.description || '').slice(0, 1200),
+        image: String(info.imageLinks?.thumbnail || info.imageLinks?.smallThumbnail || '').replace(
+          /^http:/,
+          'https:'
+        ),
+        year: String(info.publishedDate || '').slice(0, 4),
+      },
+    }
+  } catch {
+    return { found: false }
+  }
+})
+
+route('GET', 'books/:id/content', STAFF, ({ params }) => {
+  const book = db.prepare('SELECT * FROM books WHERE id = ?').get(params.id)
+  if (!book) throw httpError(404, 'El libro no existe.')
+  const pages = parsePages(book)
+  return {
+    book: { id: book.id, title: book.title, author: book.author },
+    blocks: pages.map(pageToBlock),
+    total: pages.length,
+  }
+})
+
+route('PUT', 'books/:id/content', STAFF, ({ params, body }) => {
+  const book = db.prepare('SELECT * FROM books WHERE id = ?').get(params.id)
+  if (!book) throw httpError(404, 'El libro no existe.')
+  const blocks = Array.isArray(body.blocks) ? body.blocks : []
+  if (blocks.length < 1 || blocks.length > 60) {
+    throw httpError(400, 'Agrega entre 1 y 60 bloques de lectura.')
+  }
+  for (const block of blocks) {
+    if (!String(block.text || '').trim()) throw httpError(400, 'Cada bloque necesita texto.')
+    if (String(block.text).length > 20000) {
+      throw httpError(400, 'Cada bloque puede tener como máximo 20.000 caracteres.')
+    }
+    if (String(block.question || '').length > 500) {
+      throw httpError(400, 'La pregunta de cada bloque no puede superar 500 caracteres.')
+    }
+    const filledOptions = (block.options || []).filter((option) => String(option || '').trim())
+    if (block.question && filledOptions.length > 0 && filledOptions.length < 3) {
+      throw httpError(400, 'Completa las 3 opciones o deja la pregunta sin opciones (reflexión).')
+    }
+  }
+  const previousPages = parsePages(book)
+  const pages = blocksToPages(blocks, previousPages)
+  db.prepare('UPDATE books SET pages_json = ? WHERE id = ?').run(JSON.stringify(pages), book.id)
+  return { ok: true, blocks: pages.map(pageToBlock), total: pages.length }
 })
 
 /* --- Préstamos ----------------------------------------------------- */
@@ -545,6 +769,100 @@ route('GET', 'loans', STAFF, ({ query }) => {
   return { loans: rows }
 })
 
+route('GET', 'loans/direct/options', STAFF, ({ query }) => {
+  const fold = (value) =>
+    String(value || '')
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .toLowerCase()
+  const userQuery = fold(query.userQuery || '')
+  const bookQuery = fold(query.bookQuery || '')
+
+  const users = db
+    .prepare(
+      `SELECT id, nombre, correo, rol FROM users
+        WHERE rol IN ('Estudiante','Docente')
+        ORDER BY nombre COLLATE NOCASE`
+    )
+    .all()
+    .filter(
+      (user) =>
+        !userQuery ||
+        fold(user.nombre).includes(userQuery) ||
+        fold(user.correo).includes(userQuery)
+    )
+    .slice(0, 12)
+    .map((user) => ({ ...publicUser(user), overdue: overdueLoansFor(user.id) }))
+
+  const books = db
+    .prepare('SELECT * FROM books ORDER BY title COLLATE NOCASE')
+    .all()
+    .filter(
+      (book) =>
+        !bookQuery ||
+        fold(book.title).includes(bookQuery) ||
+        fold(book.isbn).includes(bookQuery) ||
+        fold(book.author).includes(bookQuery)
+    )
+    .slice(0, 12)
+    .map((book) => ({
+      id: book.id,
+      title: book.title,
+      author: book.author,
+      isbn: book.isbn,
+      signature: book.signature,
+      digital: Boolean(book.digital),
+      copiesTotal: Number(book.copies_total),
+      copiesAvailable: Number(book.copies_available),
+    }))
+
+  return { users, books }
+})
+
+route('POST', 'loans/direct', STAFF, ({ body, user }) => {
+  const borrower = db.prepare('SELECT * FROM users WHERE id = ?').get(Number(body.userId))
+  if (!borrower) throw httpError(404, 'El usuario no existe.')
+  if (!READERS.includes(borrower.rol)) {
+    throw httpError(400, 'Solo se pueden prestar libros a estudiantes o docentes.')
+  }
+  const book = db.prepare('SELECT * FROM books WHERE id = ?').get(String(body.bookId || ''))
+  if (!book) throw httpError(404, 'El libro no existe.')
+  if (Number(book.copies_available) <= 0) {
+    throw httpError(409, 'No hay ejemplares disponibles de este libro.')
+  }
+  const overdue = overdueLoansFor(borrower.id)
+  if (overdue > 0) {
+    throw httpError(
+      409,
+      `${borrower.nombre} tiene ${overdue} préstamo${overdue === 1 ? '' : 's'} vencido${overdue === 1 ? '' : 's'}. Regulariza la situación antes de un nuevo préstamo.`
+    )
+  }
+  if (hasOpenLoan(borrower.id, book.id)) {
+    throw httpError(409, 'El usuario ya tiene un préstamo o solicitud de este libro.')
+  }
+  const today = ymd()
+  const requested = String(body.dueDate || '').trim()
+  const dueDate = requested || addDays(today, 15)
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(dueDate) || Number.isNaN(Date.parse(`${dueDate}T12:00:00`))) {
+    throw httpError(400, 'La fecha límite no es válida.')
+  }
+  if (dueDate < today) throw httpError(400, 'La fecha límite no puede ser anterior a hoy.')
+  const days = diffDays(today, dueDate)
+
+  const loan = withTransaction(() => {
+    takeCopy(book.id)
+    const info = db
+      .prepare(
+        `INSERT INTO loans (book_id, user_id, status, loan_date, due_date, requested_days, approved_by, created_at)
+         VALUES (?, ?, 'activo', ?, ?, ?, ?, ?)`
+      )
+      .run(book.id, borrower.id, today, dueDate, days, user.id, nowISO())
+    return db.prepare('SELECT * FROM loans WHERE id = ?').get(info.lastInsertRowid)
+  })
+
+  return { loan: loanDto(loan, { user: borrower, book }) }
+}, { status: 201 })
+
 route('POST', 'loans', READERS, ({ body, user }) => {
   const bookId = String(body.bookId || '')
   const book = db.prepare('SELECT * FROM books WHERE id = ?').get(bookId)
@@ -580,10 +898,13 @@ route('PATCH', 'loans/:id/approve', STAFF, ({ params, user }) => {
   const borrower = db.prepare('SELECT * FROM users WHERE id = ?').get(loan.user_id)
   const days = loan.requested_days || (borrower?.rol === 'Docente' ? 30 : 8)
   const today = ymd()
-  db.prepare(
-    `UPDATE loans SET status = 'activo', loan_date = ?, due_date = ?, approved_by = ?, returned_at = NULL
-      WHERE id = ?`
-  ).run(today, addDays(today, days), user.id, loan.id)
+  withTransaction(() => {
+    takeCopy(loan.book_id)
+    db.prepare(
+      `UPDATE loans SET status = 'activo', loan_date = ?, due_date = ?, approved_by = ?, returned_at = NULL
+        WHERE id = ?`
+    ).run(today, addDays(today, days), user.id, loan.id)
+  })
   const updated = db.prepare('SELECT * FROM loans WHERE id = ?').get(loan.id)
   return { loan: loanDto(updated) }
 })
@@ -593,9 +914,12 @@ route('PATCH', 'loans/:id/return', STAFF, ({ params }) => {
   if (!loan) throw httpError(404, 'El préstamo no existe.')
   if (loan.status === 'pendiente') throw httpError(409, 'La solicitud aún no ha sido aprobada.')
   if (loan.returned_at) throw httpError(409, 'El préstamo ya fue devuelto.')
-  db.prepare(
-    `UPDATE loans SET status = 'devuelto', returned_at = ? WHERE id = ?`
-  ).run(nowISO(), loan.id)
+  withTransaction(() => {
+    db.prepare(
+      `UPDATE loans SET status = 'devuelto', returned_at = ? WHERE id = ?`
+    ).run(nowISO(), loan.id)
+    releaseCopy(loan.book_id)
+  })
   const updated = db.prepare('SELECT * FROM loans WHERE id = ?').get(loan.id)
   return { loan: loanDto(updated) }
 })
@@ -1067,8 +1391,9 @@ async function dispatch(req, res) {
     return
   }
   const { route: definition, params } = match
-  const user = sessionUser(req)
+  let user = null
   if (!definition.public) {
+    user = sessionUser(req)
     if (!user) throw httpError(401, 'Debes iniciar sesión.')
     if (definition.roles && !definition.roles.includes(user.rol)) {
       throw httpError(403, 'No tienes permisos para realizar esta acción.')
@@ -1076,7 +1401,7 @@ async function dispatch(req, res) {
   }
   const body = ['POST', 'PUT', 'PATCH'].includes(req.method) ? await readBody(req) : {}
   const query = Object.fromEntries(url.searchParams.entries())
-  const result = definition.handler({ req, res, params, query, body, user })
+  const result = await definition.handler({ req, res, params, query, body, user })
   if (result && result.raw) {
     sendText(res, 200, result.raw.body, result.raw.contentType, result.raw.headers || {})
     return

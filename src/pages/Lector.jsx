@@ -42,6 +42,8 @@ function Lector() {
   const [selectedOption, setSelectedOption] = useState(null)
   const [showFeedback, setShowFeedback] = useState(false)
   const [score, setScore] = useState(0)
+  const [reflectionText, setReflectionText] = useState('')
+  const [reflectionDone, setReflectionDone] = useState(false)
 
   const articleRef = useRef(null)
   const openedRef = useRef(false)
@@ -90,6 +92,8 @@ function Lector() {
         setPage(data)
         setSelectedOption(null)
         setShowFeedback(false)
+        setReflectionText('')
+        setReflectionDone(false)
         setSelection(null)
         setNoteMode(false)
         window.scrollTo({ top: 0, behavior: 'smooth' })
@@ -579,66 +583,99 @@ function Lector() {
 
               {page.trivia && (
                 <div className="bg-surface-container-low rounded-xl p-3 sm:p-4 flex flex-col gap-3">
-                  <span className="text-[10px] uppercase tracking-wider font-bold text-secondary">Trivia express</span>
+                  <span className="text-[10px] uppercase tracking-wider font-bold text-secondary">
+                    {page.trivia.type === 'reflection' ? 'Pregunta de reflexión' : 'Trivia express'}
+                  </span>
                   <p className="text-xs font-semibold text-on-surface leading-snug">{page.trivia.question}</p>
 
-                  <div className="flex flex-col gap-2 pt-1">
-                    {page.trivia.options.map((option) => (
-                      <label
-                        key={option.id}
-                        className={`flex items-start gap-2.5 p-3 rounded-lg cursor-pointer text-xs transition-all border ${
-                          selectedOption === option.id
-                            ? 'bg-amber-100/70 border-amber-300 text-amber-950 font-medium'
-                            : 'bg-surface-container-lowest border-outline-variant/20 hover:bg-surface-container'
-                        }`}
+                  {page.trivia.type === 'reflection' || !page.trivia.options?.length ? (
+                    <div className="flex flex-col gap-2">
+                      <textarea
+                        rows={3}
+                        data-testid="reflexion"
+                        value={reflectionText}
+                        onChange={(event) => setReflectionText(event.target.value)}
+                        placeholder="Escribe tu reflexión…"
+                        className="w-full px-3 py-2 rounded-lg bg-surface-container-lowest text-on-surface text-xs focus:outline-none resize-y"
+                      />
+                      <button
+                        type="button"
+                        disabled={!reflectionText.trim() || reflectionDone}
+                        onClick={() => {
+                          setReflectionDone(true)
+                          setScore((prev) => prev + 50)
+                        }}
+                        className="min-h-[44px] w-full rounded-lg bg-secondary text-on-secondary text-xs font-bold disabled:opacity-50"
                       >
-                        <input
-                          type="radio"
-                          name={`trivia-${page.folio}`}
-                          checked={selectedOption === option.id}
-                          onChange={() => {
-                            setSelectedOption(option.id)
-                            setShowFeedback(false)
-                          }}
-                          className="mt-0.5 cursor-pointer"
-                        />
-                        <span className="flex flex-col">
-                          <span className="font-semibold">
-                            [{option.id}] {option.text}
-                          </span>
-                          <span className="text-[10px] text-on-surface-variant/80 mt-0.5">{option.hint}</span>
-                        </span>
-                      </label>
-                    ))}
-
-                    <button
-                      type="button"
-                      disabled={!selectedOption}
-                      onClick={validarTrivia}
-                      className="mt-1 min-h-[44px] w-full rounded-lg bg-secondary hover:bg-secondary/90 text-on-secondary text-xs font-bold transition-all disabled:opacity-50 disabled:cursor-not-allowed"
-                    >
-                      Validar respuesta
-                    </button>
-                  </div>
-
-                  {showFeedback && (
-                    <div
-                      className={`p-3 rounded-lg text-xs leading-relaxed ${
-                        selectedOption === page.trivia.correctOption
-                          ? 'bg-green-100 text-green-950 border border-green-300'
-                          : 'bg-red-100 text-red-950 border border-red-300'
-                      }`}
-                    >
-                      <div className="flex items-center gap-1.5 font-bold mb-1">
-                        <span className="material-symbols-outlined text-sm">
-                          {selectedOption === page.trivia.correctOption ? 'check_circle' : 'cancel'}
-                        </span>
-                        <span>
-                          {selectedOption === page.trivia.correctOption ? '¡Correcto! (+100 pts)' : 'Respuesta errónea'}
-                        </span>
-                      </div>
-                      <p className="text-[11px] opacity-90">{page.trivia.explanation}</p>
+                        {reflectionDone ? 'Reflexión registrada (+50 pts)' : 'Registrar reflexión (+50 pts)'}
+                      </button>
+                      {page.trivia.explanation && (
+                        <p className="text-[11px] text-on-surface-variant">{page.trivia.explanation}</p>
+                      )}
                     </div>
+                  ) : (
+                    <>
+                      <div className="flex flex-col gap-2 pt-1">
+                        {page.trivia.options.map((option) => (
+                          <label
+                            key={option.id}
+                            className={`flex items-start gap-2.5 p-3 rounded-lg cursor-pointer text-xs transition-all border ${
+                              selectedOption === option.id
+                                ? 'bg-amber-100/70 border-amber-300 text-amber-950 font-medium'
+                                : 'bg-surface-container-lowest border-outline-variant/20 hover:bg-surface-container'
+                            }`}
+                          >
+                            <input
+                              type="radio"
+                              name={`trivia-${page.folio}`}
+                              checked={selectedOption === option.id}
+                              onChange={() => {
+                                setSelectedOption(option.id)
+                                setShowFeedback(false)
+                              }}
+                              className="mt-0.5 cursor-pointer"
+                            />
+                            <span className="flex flex-col">
+                              <span className="font-semibold">
+                                [{option.id}] {option.text}
+                              </span>
+                              <span className="text-[10px] text-on-surface-variant/80 mt-0.5">{option.hint}</span>
+                            </span>
+                          </label>
+                        ))}
+
+                        <button
+                          type="button"
+                          disabled={!selectedOption}
+                          onClick={validarTrivia}
+                          className="mt-1 min-h-[44px] w-full rounded-lg bg-secondary hover:bg-secondary/90 text-on-secondary text-xs font-bold transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+                        >
+                          Validar respuesta
+                        </button>
+                      </div>
+
+                      {showFeedback && (
+                        <div
+                          className={`p-3 rounded-lg text-xs leading-relaxed ${
+                            selectedOption === page.trivia.correctOption
+                              ? 'bg-green-100 text-green-950 border border-green-300'
+                              : 'bg-red-100 text-red-950 border border-red-300'
+                          }`}
+                        >
+                          <div className="flex items-center gap-1.5 font-bold mb-1">
+                            <span className="material-symbols-outlined text-sm">
+                              {selectedOption === page.trivia.correctOption ? 'check_circle' : 'cancel'}
+                            </span>
+                            <span>
+                              {selectedOption === page.trivia.correctOption
+                                ? '¡Correcto! (+100 pts)'
+                                : 'Respuesta errónea'}
+                            </span>
+                          </div>
+                          <p className="text-[11px] opacity-90">{page.trivia.explanation}</p>
+                        </div>
+                      )}
+                    </>
                   )}
                 </div>
               )}

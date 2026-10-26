@@ -35,7 +35,7 @@ function Login() {
   const location = useLocation()
   const [showPassword, setShowPassword] = useState(false)
   const [correo, setCorreo] = useState('estudiante@tdea.edu.co')
-  const [password, setPassword] = useState('123456')
+  const [password, setPassword] = useState('')
   const [rolSeleccionado, setRolSeleccionado] = useState('Estudiante')
   const [error, setError] = useState('')
   const [enviando, setEnviando] = useState(false)
@@ -45,7 +45,7 @@ function Login() {
   const seleccionarRol = (demo) => {
     setRolSeleccionado(demo.rol)
     setCorreo(demo.correo)
-    setPassword('123456')
+    setPassword('')
     setError('')
   }
 
@@ -206,7 +206,7 @@ function Login() {
               </form>
 
               <p className="mt-3 font-body-sm text-body-sm text-on-surface-variant">
-                Los perfiles de demostración usan la contraseña <span className="font-mono font-semibold">123456</span>.
+                Las credenciales de demostración están documentadas en el README del proyecto.
               </p>
             </div>
 

@@ -13,6 +13,7 @@ import Reportes from './pages/Reportes'
 import Chat from './pages/Chat'
 import AdminChat from './pages/AdminChat'
 import Usuarios from './pages/Usuarios'
+import Perfil from './pages/Perfil'
 import NotFound from './pages/NotFound'
 
 const READERS = ['Estudiante', 'Docente']
@@ -72,6 +73,7 @@ function App() {
           }
         />
         <Route path="/historial" element={<Historial />} />
+        <Route path="/perfil" element={<Perfil />} />
         <Route
           path="/reportes"
           element={

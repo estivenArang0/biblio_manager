@@ -80,9 +80,11 @@ async function request(path, { method = 'GET', body, params, raw } = {}) {
   if (!response.ok) {
     const message =
       (data && typeof data === 'object' && data.error) || `Error ${response.status}`
-    if (response.status === 401 && token) {
+    if (response.status === 401 && token && path !== '/auth/login') {
       clearToken()
-      window.dispatchEvent(new Event('biblio:session-expired'))
+      window.dispatchEvent(
+        new CustomEvent('biblio:session-expired', { detail: { code: data?.code || '' } })
+      )
     }
     throw new ApiError(response.status, message, data)
   }
@@ -94,15 +96,26 @@ export const api = {
     request('/auth/login', { method: 'POST', body: { correo, password } }),
   logout: () => request('/auth/logout', { method: 'POST' }),
   me: () => request('/auth/me'),
+  changePassword: (currentPassword, newPassword) =>
+    request('/auth/password', {
+      method: 'PATCH',
+      body: { currentPassword, newPassword },
+    }),
 
   books: () => request('/books'),
   createBook: (book) => request('/books', { method: 'POST', body: book }),
   updateBook: (id, book) => request(`/books/${encodeURIComponent(id)}`, { method: 'PUT', body: book }),
+  googleBooksByIsbn: (isbn) => request(`/books/isbn/${encodeURIComponent(isbn)}`),
+  bookContent: (id) => request(`/books/${encodeURIComponent(id)}/content`),
+  updateBookContent: (id, blocks) =>
+    request(`/books/${encodeURIComponent(id)}/content`, { method: 'PUT', body: { blocks } }),
 
   myLoans: () => request('/loans/mine'),
   pendingLoans: () => request('/loans/pending'),
   allLoans: (params) => request('/loans', { params }),
+  loanOptions: (params) => request('/loans/direct/options', { params }),
   requestLoan: (bookId) => request('/loans', { method: 'POST', body: { bookId } }),
+  createDirectLoan: (payload) => request('/loans/direct', { method: 'POST', body: payload }),
   approveLoan: (id) => request(`/loans/${id}/approve`, { method: 'PATCH' }),
   returnLoan: (id) => request(`/loans/${id}/return`, { method: 'PATCH' }),
 

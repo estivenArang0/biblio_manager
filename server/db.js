@@ -34,6 +34,7 @@ function migrate(db) {
       token TEXT PRIMARY KEY,
       user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
       created_at TEXT NOT NULL,
+      last_seen_at TEXT NOT NULL,
       expires_at TEXT NOT NULL
     );
 
@@ -51,6 +52,8 @@ function migrate(db) {
       physical INTEGER NOT NULL DEFAULT 0,
       image TEXT DEFAULT '',
       description TEXT DEFAULT '',
+      copies_total INTEGER NOT NULL DEFAULT 3,
+      copies_available INTEGER NOT NULL DEFAULT 3,
       pages_json TEXT NOT NULL,
       created_at TEXT NOT NULL
     );
@@ -108,6 +111,20 @@ function migrate(db) {
     CREATE INDEX IF NOT EXISTS idx_messages_from ON messages(from_user);
     CREATE INDEX IF NOT EXISTS idx_messages_to ON messages(to_user);
   `)
+
+  // Migración suave para bases creadas con la versión anterior.
+  const sessionColumns = db.prepare('PRAGMA table_info(sessions)').all()
+  if (!sessionColumns.some((column) => column.name === 'last_seen_at')) {
+    db.exec('ALTER TABLE sessions ADD COLUMN last_seen_at TEXT')
+    db.exec('UPDATE sessions SET last_seen_at = created_at WHERE last_seen_at IS NULL')
+  }
+  const bookColumns = db.prepare('PRAGMA table_info(books)').all()
+  if (!bookColumns.some((column) => column.name === 'copies_total')) {
+    db.exec('ALTER TABLE books ADD COLUMN copies_total INTEGER NOT NULL DEFAULT 3')
+  }
+  if (!bookColumns.some((column) => column.name === 'copies_available')) {
+    db.exec('ALTER TABLE books ADD COLUMN copies_available INTEGER NOT NULL DEFAULT 3')
+  }
 }
 
 function seed(db) {
@@ -123,11 +140,20 @@ function seed(db) {
     insertUser.run(user.nombre, user.correo, user.rol, passwordHash, now)
   }
 
+  const seedLoans = buildSeedLoans()
+  const activeByBook = new Map()
+  for (const loan of seedLoans) {
+    if (loan.status === 'devuelto' || loan.status === 'pendiente') continue
+    activeByBook.set(loan.book, (activeByBook.get(loan.book) || 0) + 1)
+  }
+
   const insertBook = db.prepare(`
-    INSERT INTO books (id, title, author, tag, genre, isbn, signature, year, format, digital, physical, image, description, pages_json, created_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    INSERT INTO books (id, title, author, tag, genre, isbn, signature, year, format, digital, physical, image, description, copies_total, copies_available, pages_json, created_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `)
   for (const book of seedBooks) {
+    const copiesTotal = 5
+    const copiesAvailable = Math.max(0, copiesTotal - (activeByBook.get(book.id) || 0))
     insertBook.run(
       book.id,
       book.title,
@@ -142,6 +168,8 @@ function seed(db) {
       book.physical,
       book.image,
       book.description,
+      copiesTotal,
+      copiesAvailable,
       JSON.stringify(book.pages),
       now
     )
@@ -155,7 +183,7 @@ function seed(db) {
     INSERT INTO loans (book_id, user_id, status, loan_date, due_date, returned_at, requested_days, approved_by, created_at)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
   `)
-  for (const loan of buildSeedLoans()) {
+  for (const loan of seedLoans) {
     insertLoan.run(
       loan.book,
       userId.get(loan.user),

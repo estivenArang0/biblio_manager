@@ -57,9 +57,9 @@ export function AuthProvider({ children }) {
     clearToken()
     setUser(null)
     if (reason === 'idle') {
-      setNotice('Tu sesión se cerró automáticamente tras 30 minutos sin actividad.')
+      setNotice('Tu sesión venció por inactividad')
     } else if (reason === 'expired') {
-      setNotice('Tu sesión expiró. Inicia sesión de nuevo.')
+      setNotice('Tu sesión venció por inactividad')
     } else {
       setNotice('')
     }
@@ -85,7 +85,7 @@ export function AuthProvider({ children }) {
     const onExpired = () => {
       clearToken()
       setUser(null)
-      setNotice('Tu sesión expiró. Inicia sesión de nuevo.')
+      setNotice('Tu sesión venció por inactividad')
     }
     window.addEventListener('biblio:session-expired', onExpired)
     return () => window.removeEventListener('biblio:session-expired', onExpired)

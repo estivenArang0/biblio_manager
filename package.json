@@ -10,7 +10,7 @@
     "build": "vite build",
     "lint": "oxlint",
     "preview": "vite preview",
-    "test": "node --test server/test/api.test.mjs"
+    "test": "node --test server/test/api.test.mjs server/test/session.test.mjs"
   },
   "dependencies": {
     "react": "^19.2.8",

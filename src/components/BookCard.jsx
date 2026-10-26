@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { Link } from 'react-router-dom'
 
-function BookCard({ book, onEdit, onRequest, requesting, esStaff }) {
+function BookCard({ book, onEdit, onContent, onRequest, requesting, esStaff }) {
   const [showDetail, setShowDetail] = useState(false)
 
   const prestamo = book.myLoan
@@ -79,6 +79,17 @@ function BookCard({ book, onEdit, onRequest, requesting, esStaff }) {
                   type="button"
                 >
                   <span className="material-symbols-outlined text-sm">edit</span>
+                </button>
+              )}
+              {esStaff && onContent && (
+                <button
+                  onClick={() => onContent(book)}
+                  title="Editar contenido de lectura"
+                  aria-label={`Editar contenido de ${book.title}`}
+                  className="min-h-[44px] px-3 bg-surface-container-low hover:bg-surface-container text-secondary rounded-lg transition-colors flex items-center justify-center cursor-pointer"
+                  type="button"
+                >
+                  <span className="material-symbols-outlined text-sm">menu_book</span>
                 </button>
               )}
             </div>
