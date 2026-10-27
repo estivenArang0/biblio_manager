@@ -1,4 +1,5 @@
 import { createServer as createHttpServer } from 'node:http'
+import fs from 'node:fs'
 import { createToken, hashPassword, verifyPassword } from './auth.js'
 import { getDb } from './db.js'
 import { buildGenericPages } from './seed.js'
@@ -21,6 +22,7 @@ const HIGHLIGHT_COLORS = ['amarillo', 'verde', 'azul']
 const idleSeconds = Number(process.env.SESSION_IDLE_SECONDS || 0)
 const idleMinutes = Number(process.env.SESSION_IDLE_MINUTES || 30)
 const SESSION_IDLE_MS = idleSeconds > 0 ? idleSeconds * 1000 : idleMinutes * 60 * 1000
+const GOOGLE_BOOKS_API_KEY = String(process.env.GOOGLE_BOOKS_API_KEY || '').trim()
 
 /* ------------------------------------------------------------------ *
  * Utilidades HTTP
@@ -359,6 +361,40 @@ function highlightDto(row) {
   }
 }
 
+function activityDto(row, book) {
+  const page = parsePages(book)[row.page] || {}
+  return {
+    id: row.id,
+    bookId: row.book_id,
+    page: row.page,
+    block: row.page + 1,
+    chapter: page.chapter || '',
+    activityType: row.activity_type,
+    answer: row.answer,
+    isCorrect: row.is_correct === null || row.is_correct === undefined ? null : Boolean(row.is_correct),
+    score: Number(row.score),
+    at: row.updated_at,
+    createdAt: row.created_at,
+  }
+}
+
+function activityTotals(userId, bookId) {
+  const row = db
+    .prepare(
+      `SELECT COUNT(*) AS answered,
+              COALESCE(SUM(CASE WHEN activity_type = 'trivia' AND is_correct = 1 THEN 1 ELSE 0 END), 0) AS correct,
+              COALESCE(SUM(score), 0) AS score
+         FROM activity_results
+        WHERE user_id = ? AND book_id = ?`
+    )
+    .get(userId, bookId)
+  return {
+    answered: Number(row.answered),
+    correct: Number(row.correct),
+    score: Number(row.score),
+  }
+}
+
 function messageDto(row, currentUserId) {
   return {
     id: row.id,
@@ -459,6 +495,57 @@ function buildReportRows({ scope = 'todos', from = '', to = '', status = '' } = 
     devueltos: filtered.filter((row) => row.status === 'devuelto').length,
   }
   return { rows: filtered, totals }
+}
+
+function buildActivityReport({ from = '', to = '' } = {}) {
+  const clauses = []
+  const params = []
+  if (from) {
+    clauses.push('substr(a.updated_at, 1, 10) >= ?')
+    params.push(from)
+  }
+  if (to) {
+    clauses.push('substr(a.updated_at, 1, 10) <= ?')
+    params.push(to)
+  }
+  const where = clauses.length ? `WHERE ${clauses.join(' AND ')}` : ''
+  const rows = db
+    .prepare(
+      `SELECT u.id AS user_id, u.nombre, u.correo, u.rol,
+              b.id AS book_id, b.title,
+              COUNT(*) AS answered,
+              COALESCE(SUM(CASE WHEN a.activity_type = 'trivia' AND a.is_correct = 1 THEN 1 ELSE 0 END), 0) AS correct,
+              COALESCE(SUM(a.score), 0) AS score,
+              MAX(a.updated_at) AS last_at
+         FROM activity_results a
+         JOIN users u ON u.id = a.user_id
+         JOIN books b ON b.id = a.book_id
+         ${where}
+        GROUP BY u.id, b.id
+        ORDER BY score DESC, u.nombre COLLATE NOCASE, b.title COLLATE NOCASE`
+    )
+    .all(...params)
+    .map((row) => ({
+      user: {
+        id: row.user_id,
+        nombre: row.nombre,
+        correo: row.correo,
+        rol: row.rol,
+      },
+      book: { id: row.book_id, title: row.title },
+      answered: Number(row.answered),
+      correct: Number(row.correct),
+      score: Number(row.score),
+      lastAt: row.last_at,
+    }))
+  return {
+    rows,
+    totals: {
+      answered: rows.reduce((total, row) => total + row.answered, 0),
+      correct: rows.reduce((total, row) => total + row.correct, 0),
+      score: rows.reduce((total, row) => total + row.score, 0),
+    },
+  }
 }
 
 /* ------------------------------------------------------------------ *
@@ -656,6 +743,13 @@ route('PUT', 'books/:id', STAFF, ({ params, body, user }) => {
 
 const GOOGLE_BOOKS_URL =
   process.env.GOOGLE_BOOKS_URL || 'https://www.googleapis.com/books/v1/volumes'
+const GOOGLE_BOOKS_FALLBACK = JSON.parse(
+  fs.readFileSync(new URL('./google-books-fallback.json', import.meta.url), 'utf8')
+)
+
+function fallbackBook(isbn) {
+  return GOOGLE_BOOKS_FALLBACK.find((book) => book.isbn === isbn) || null
+}
 
 route('GET', 'books/isbn/:isbn', STAFF, async ({ params }) => {
   const isbn = String(params.isbn || '').replace(/[-\s]/g, '').toUpperCase()
@@ -663,32 +757,41 @@ route('GET', 'books/isbn/:isbn', STAFF, async ({ params }) => {
     throw httpError(400, 'El ISBN debe tener 10 o 13 caracteres.')
   }
   try {
-    const response = await fetch(`${GOOGLE_BOOKS_URL}?q=isbn:${encodeURIComponent(isbn)}`, {
+    const url = new URL(GOOGLE_BOOKS_URL)
+    url.searchParams.set('q', `isbn:${isbn}`)
+    if (GOOGLE_BOOKS_API_KEY) url.searchParams.set('key', GOOGLE_BOOKS_API_KEY)
+    const response = await fetch(url, {
       signal: AbortSignal.timeout(5000),
       headers: { Accept: 'application/json' },
     })
-    if (!response.ok) return { found: false }
-    const payload = await response.json()
-    const info = payload?.items?.[0]?.volumeInfo
-    if (!info) return { found: false }
-    return {
-      found: true,
-      data: {
-        isbn,
-        title: String(info.title || '').slice(0, 200),
-        author: Array.isArray(info.authors) ? info.authors.join(', ').slice(0, 160) : '',
-        genre: Array.isArray(info.categories) ? info.categories.join(' / ').slice(0, 80) : '',
-        description: stripHtml(info.description || '').slice(0, 1200),
-        image: String(info.imageLinks?.thumbnail || info.imageLinks?.smallThumbnail || '').replace(
-          /^http:/,
-          'https:'
-        ),
-        year: String(info.publishedDate || '').slice(0, 4),
-      },
+    if (response.ok) {
+      const payload = await response.json()
+      const info = payload?.items?.[0]?.volumeInfo
+      if (info?.title) {
+        return {
+          found: true,
+          source: 'google',
+          data: {
+            isbn,
+            title: String(info.title || '').slice(0, 200),
+            author: Array.isArray(info.authors) ? info.authors.join(', ').slice(0, 160) : '',
+            genre: Array.isArray(info.categories) ? info.categories.join(' / ').slice(0, 80) : '',
+            description: stripHtml(info.description || '').slice(0, 1200),
+            image: String(info.imageLinks?.thumbnail || info.imageLinks?.smallThumbnail || '').replace(
+              /^http:/,
+              'https:'
+            ),
+            year: String(info.publishedDate || '').slice(0, 4),
+          },
+        }
+      }
     }
   } catch {
-    return { found: false }
+    /* se usa el respaldo local */
   }
+  const local = fallbackBook(isbn)
+  if (local) return { found: true, source: 'local', data: { ...local, isbn } }
+  return { found: false }
 })
 
 route('GET', 'books/:id/content', STAFF, ({ params }) => {
@@ -979,6 +1082,81 @@ route('GET', 'reading/:bookId/page/:index', READERS, ({ params, user }) => {
   }
 })
 
+route('GET', 'reading/:bookId/activity', READERS, ({ params, user }) => {
+  const { book } = requireReadingAccess(user, params.bookId)
+  const rows = db
+    .prepare('SELECT * FROM activity_results WHERE user_id = ? AND book_id = ? ORDER BY page')
+    .all(user.id, params.bookId)
+  return {
+    activities: rows.map((row) => activityDto(row, book)),
+    totals: activityTotals(user.id, params.bookId),
+  }
+})
+
+route('POST', 'reading/:bookId/activity', READERS, ({ params, body, user }) => {
+  const { book } = requireReadingAccess(user, params.bookId)
+  const pages = parsePages(book)
+  const blockIndex = Number(body.blockIndex)
+  if (!Number.isInteger(blockIndex) || blockIndex < 0 || blockIndex >= pages.length) {
+    throw httpError(400, 'El bloque indicado no existe.')
+  }
+  const trivia = pages[blockIndex]?.trivia
+  if (!trivia) throw httpError(400, 'Este bloque no tiene actividad.')
+  const expectedType =
+    trivia.type === 'reflection' || !Array.isArray(trivia.options) || trivia.options.length === 0
+      ? 'reflection'
+      : 'trivia'
+  if (body.type && body.type !== expectedType) {
+    throw httpError(400, 'El tipo de actividad no corresponde al bloque.')
+  }
+
+  let answer
+  let isCorrect = null
+  let score = 0
+  if (expectedType === 'trivia') {
+    answer = String(body.answer || '').trim()
+    const option = trivia.options.find((item) => item.id === answer)
+    if (!option) throw httpError(400, 'Selecciona una opción válida.')
+    isCorrect = answer === trivia.correctOption
+    score = isCorrect ? 100 : 0
+  } else {
+    answer = String(body.answer || '').trim()
+    if (!answer) throw httpError(400, 'La reflexión no puede estar vacía.')
+    if (answer.length > 2000) throw httpError(400, 'La reflexión no puede superar 2000 caracteres.')
+    score = 50
+  }
+
+  const now = nowISO()
+  db.prepare(
+    `INSERT INTO activity_results
+       (user_id, book_id, page, activity_type, answer, is_correct, score, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+     ON CONFLICT(user_id, book_id, page) DO UPDATE SET
+       activity_type = excluded.activity_type,
+       answer = excluded.answer,
+       is_correct = excluded.is_correct,
+       score = excluded.score,
+       updated_at = excluded.updated_at`
+  ).run(
+    user.id,
+    book.id,
+    blockIndex,
+    expectedType,
+    answer,
+    isCorrect === null ? null : isCorrect ? 1 : 0,
+    score,
+    now,
+    now
+  )
+  const row = db
+    .prepare('SELECT * FROM activity_results WHERE user_id = ? AND book_id = ? AND page = ?')
+    .get(user.id, book.id, blockIndex)
+  return {
+    result: activityDto(row, book),
+    totals: activityTotals(user.id, book.id),
+  }
+}, { status: 201 })
+
 route('POST', 'reading/:bookId/session', READERS, ({ params, body, user }) => {
   const event = String(body.event || '')
   if (!['open', 'close'].includes(event)) throw httpError(400, 'Evento de lectura inválido.')
@@ -1101,6 +1279,29 @@ route('GET', 'history', null, ({ user }) => {
         )
         .all(user.id)
 
+  const activityRows = staff
+    ? db
+        .prepare(
+          `SELECT a.*, b.title, b.author, b.image, b.pages_json,
+                  u.nombre AS user_nombre, u.correo AS user_correo, u.rol AS user_rol
+             FROM activity_results a
+             JOIN books b ON b.id = a.book_id
+             JOIN users u ON u.id = a.user_id
+            ORDER BY a.updated_at DESC LIMIT 300`
+        )
+        .all()
+    : db
+        .prepare(
+          `SELECT a.*, b.title, b.author, b.image, b.pages_json,
+                  u.nombre AS user_nombre, u.correo AS user_correo, u.rol AS user_rol
+             FROM activity_results a
+             JOIN books b ON b.id = a.book_id
+             JOIN users u ON u.id = a.user_id
+            WHERE a.user_id = ?
+            ORDER BY a.updated_at DESC LIMIT 300`
+        )
+        .all(user.id)
+
   return {
     scope: staff ? 'global' : 'personal',
     loans: loanRows.map((row) => loanDto(row)),
@@ -1113,6 +1314,18 @@ route('GET', 'history', null, ({ user }) => {
       event: row.event,
       at: row.at,
       user: { nombre: row.user_nombre, correo: row.user_correo },
+    })),
+    activities: activityRows.map((row) => ({
+      ...activityDto(row, { pages_json: row.pages_json }),
+      title: row.title,
+      author: row.author,
+      image: row.image,
+      user: {
+        id: row.user_id,
+        nombre: row.user_nombre,
+        correo: row.user_correo,
+        rol: row.user_rol,
+      },
     })),
   }
 })
@@ -1169,6 +1382,49 @@ route('GET', 'reports/loans.csv', STAFF, ({ query }) => {
       contentType: 'text/csv; charset=utf-8',
       headers: {
         'Content-Disposition': `attachment; filename="reporte-prestamos-${ymd()}.csv"`,
+      },
+    },
+  }
+})
+
+route('GET', 'reports/activities', STAFF, ({ query }) => {
+  return buildActivityReport({ from: query.from || '', to: query.to || '' })
+})
+
+route('GET', 'reports/activities.csv', STAFF, ({ query }) => {
+  const { rows } = buildActivityReport({ from: query.from || '', to: query.to || '' })
+  const header = [
+    'Usuario',
+    'Correo',
+    'Rol',
+    'Libro',
+    'Actividades respondidas',
+    'Aciertos trivia',
+    'Puntaje total',
+  ]
+  const lines = [header.map(csvEscape).join(',')]
+  for (const row of rows) {
+    lines.push(
+      [
+        row.user.nombre,
+        row.user.correo,
+        row.user.rol,
+        row.book.title,
+        row.answered,
+        row.correct,
+        row.score,
+      ]
+        .map(csvEscape)
+        .join(',')
+    )
+  }
+  const csv = `\uFEFF${lines.join('\r\n')}`
+  return {
+    raw: {
+      body: csv,
+      contentType: 'text/csv; charset=utf-8',
+      headers: {
+        'Content-Disposition': `attachment; filename="reporte-actividades-${ymd()}.csv"`,
       },
     },
   }

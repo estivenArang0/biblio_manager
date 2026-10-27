@@ -128,6 +128,9 @@ export const api = {
       method: 'POST',
       body: { event },
     }),
+  bookActivities: (bookId) => request(`/reading/${encodeURIComponent(bookId)}/activity`),
+  submitActivity: (bookId, payload) =>
+    request(`/reading/${encodeURIComponent(bookId)}/activity`, { method: 'POST', body: payload }),
 
   highlights: (bookId) => request('/highlights', { params: { bookId } }),
   createHighlight: (highlight) => request('/highlights', { method: 'POST', body: highlight }),
@@ -136,6 +139,7 @@ export const api = {
 
   history: () => request('/history'),
   report: (params) => request('/reports/loans', { params }),
+  reportActivities: (params) => request('/reports/activities', { params }),
   downloadReportCsv: async (params) => {
     const response = await request('/reports/loans.csv', { params, raw: true })
     const blob = await response.blob()
@@ -143,6 +147,18 @@ export const api = {
     const link = document.createElement('a')
     link.href = url
     link.download = `reporte-prestamos-${new Date().toISOString().slice(0, 10)}.csv`
+    document.body.appendChild(link)
+    link.click()
+    link.remove()
+    URL.revokeObjectURL(url)
+  },
+  downloadActivitiesCsv: async (params) => {
+    const response = await request('/reports/activities.csv', { params, raw: true })
+    const blob = await response.blob()
+    const url = URL.createObjectURL(blob)
+    const link = document.createElement('a')
+    link.href = url
+    link.download = `reporte-actividades-${new Date().toISOString().slice(0, 10)}.csv`
     document.body.appendChild(link)
     link.click()
     link.remove()

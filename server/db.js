@@ -94,6 +94,20 @@ function migrate(db) {
       updated_at TEXT NOT NULL
     );
 
+    CREATE TABLE IF NOT EXISTS activity_results (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id INTEGER NOT NULL REFERENCES users(id),
+      book_id TEXT NOT NULL REFERENCES books(id),
+      page INTEGER NOT NULL,
+      activity_type TEXT NOT NULL CHECK (activity_type IN ('trivia','reflection')),
+      answer TEXT NOT NULL,
+      is_correct INTEGER,
+      score INTEGER NOT NULL DEFAULT 0,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      UNIQUE(user_id, book_id, page)
+    );
+
     CREATE TABLE IF NOT EXISTS messages (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       from_user INTEGER NOT NULL REFERENCES users(id),
@@ -108,6 +122,7 @@ function migrate(db) {
     CREATE INDEX IF NOT EXISTS idx_loans_book ON loans(book_id);
     CREATE INDEX IF NOT EXISTS idx_events_user ON reading_events(user_id);
     CREATE INDEX IF NOT EXISTS idx_highlights_user_book ON highlights(user_id, book_id);
+    CREATE INDEX IF NOT EXISTS idx_activities_user_book ON activity_results(user_id, book_id);
     CREATE INDEX IF NOT EXISTS idx_messages_from ON messages(from_user);
     CREATE INDEX IF NOT EXISTS idx_messages_to ON messages(to_user);
   `)

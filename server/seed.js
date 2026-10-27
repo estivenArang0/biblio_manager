@@ -198,6 +198,22 @@ const quijotePages = [
     },
     glossary: quijoteGlossary,
   },
+  {
+    folio: 145,
+    chapter: 'CIERRE • PREGUNTA DE REFLEXIÓN',
+    paragraphs: [
+      `La lectura de un clásico no termina en la última línea: continúa en la conversación que cada lector establece con el texto y con su propia época. Don Quijote propone una pregunta que sigue abierta: ¿qué sucede cuando el ideal y la realidad dejan de coincidir?`,
+      `Escribe una reflexión breve relacionando la aventura de los molinos con una situación actual en la que las expectativas y los hechos no coinciden. Argumenta tu respuesta con al menos una referencia al texto.`,
+    ],
+    trivia: {
+      type: 'reflection',
+      question:
+        '¿Qué relación puedes establecer entre la mirada de don Quijote sobre los molinos y una situación actual en la que las expectativas y los hechos no coinciden?',
+      explanation:
+        'Una buena reflexión conecta una escena del texto con una experiencia o problema contemporáneo, y justifica la relación con evidencia textual.',
+    },
+    glossary: quijoteGlossary,
+  },
 ]
 
 const genericGlossary = [

@@ -1,6 +1,6 @@
 # Biblio Manager
 
-Portal bibliotecario del **Tecnológico de Antioquia I.U.** para consultar el acervo, solicitar préstamos, leer en línea, subrayar textos, recibir recomendaciones y comunicarse con la administración.
+Portal bibliotecario del **Tecnológico de Antioquia I.U.** para consultar el acervo, solicitar préstamos, leer en línea, subrayar textos, responder trivias y reflexiones, recibir recomendaciones y comunicarse con la administración.
 
 Proyecto integrador (PPI) de la asignatura **Lógica de Programación**.
 
@@ -95,7 +95,21 @@ Todas las rutas del API validan la sesión y el rol en el **servidor**. Si se es
 ### Google Books por ISBN
 - En “Registrar/editar libro”, el botón **Buscar datos** consulta `https://www.googleapis.com/books/v1/volumes?q=isbn:...`.
 - Rellena título, autor, género, descripción y portada; el bibliotecario puede corregir todo antes de guardar.
-- Timeout de 5 segundos. Si no hay datos, cuota agotada o error de red, muestra **“No se encontraron datos, escríbelos manualmente.”** y el formulario sigue funcionando.
+- Timeout de 5 segundos. Si no hay datos, cuota agotada o error de red, usa el respaldo local de 5 ISBN; si tampoco está, muestra **“No se encontraron datos, escríbelos manualmente.”** y el formulario sigue funcionando.
+
+#### API key gratuita de Google Books (opcional)
+1. Entra a <https://console.cloud.google.com/> y crea o selecciona un proyecto.
+2. Ve a **APIs y servicios → Biblioteca**, busca **Books API** y pulsa **Habilitar**.
+3. En **APIs y servicios → Credenciales**, crea una **clave de API**.
+4. Pega la clave en `.env`:
+
+```env
+GOOGLE_BOOKS_API_KEY=tu_clave_aqui
+```
+
+5. Reinicia `npm run dev`. Si la variable está vacía, se consulta sin llave como antes.
+
+**Respaldo local:** `server/google-books-fallback.json` contiene 5 ISBN reales (Quijote, Cien años de soledad, El infinito en un junco, El Aleph y Sapiens). Se usa automáticamente si Google responde 429 o falla, para poder demostrar la función sin depender de la cuota.
 
 ### Contenido de lectura editable
 - En el catálogo, el botón con ícono de libro (staff) abre **Contenido de lectura**.
@@ -120,8 +134,15 @@ Todas las rutas del API validan la sesión y el rol en el **servidor**. Si se es
 - Clic en un resaltado abre el editor: cambiar color, editar/borrar nota o quitar el resaltado.
 - Cada usuario solo ve y modifica sus propios resaltados.
 
+### Resultados de actividades
+- Cada respuesta de trivia o reflexión se guarda en `activity_results` con usuario, libro, bloque, tipo, respuesta, acierto (solo trivia), puntaje y fecha.
+- Se guarda el **último intento** por bloque; el puntaje total no se duplica al repetir.
+- Al reabrir el libro, los bloques respondidos muestran la insignia **Completado** y recuperan la respuesta.
+- **Historial → Actividades** muestra libro, bloque, tipo, resultado y fecha. Cada usuario ve lo suyo; staff ve el historial global.
+- **Reportes → Resultados de actividades** agrupa por usuario/libro con actividades respondidas, aciertos de trivia y puntaje total, filtro por fecha y CSV.
+
 ### Reportes
-- Pestañas: estudiantes, docentes y todos los usuarios.
+- Pestañas: préstamos por estudiantes/docentes/todos y resultados de actividades.
 - Filtros por fecha y estado; totales de total, activos, vencidos y devueltos.
 - Exportación CSV desde el API (solo Bibliotecario/Administrador).
 
@@ -164,7 +185,7 @@ scripts/dev.mjs Levanta API + Vite en un comando
 ## Pruebas
 
 ```bash
-npm test        # 17 pruebas de integración del backend
+npm test        # 18 pruebas de integración del backend
 npm run lint
 npm run build
 ```

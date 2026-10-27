@@ -13,6 +13,7 @@ const base = `http://127.0.0.1:${port}/api`
 let dbFile = path.join(os.tmpdir(), `biblio-test-${process.pid}.db`)
 let server
 let googleMock
+let lastGoogleKey = null
 const password = process.env.DEMO_PASSWORD || '123456'
 
 const tokens = {}
@@ -73,6 +74,23 @@ before(async () => {
       res.writeHead(404).end()
       return
     }
+    const isbn = String(url.searchParams.get('q') || '').replace('isbn:', '')
+    lastGoogleKey = url.searchParams.get('key')
+    if (isbn === '9780307474728') {
+      res.writeHead(200, { 'Content-Type': 'application/json' })
+      res.end(JSON.stringify({ items: [] }))
+      return
+    }
+    if (isbn === '9788417846184') {
+      res.writeHead(429, { 'Content-Type': 'application/json' })
+      res.end(JSON.stringify({ error: { code: 429 } }))
+      return
+    }
+    if (isbn !== '9788437604947') {
+      res.writeHead(200, { 'Content-Type': 'application/json' })
+      res.end(JSON.stringify({ items: [] }))
+      return
+    }
     res.writeHead(200, { 'Content-Type': 'application/json' })
     res.end(
       JSON.stringify({
@@ -100,6 +118,7 @@ before(async () => {
       BIBLIO_DB: dbFile,
       DEMO_PASSWORD: password,
       GOOGLE_BOOKS_URL: 'http://127.0.0.1:4125/books/v1/volumes',
+      GOOGLE_BOOKS_API_KEY: 'test-key',
     },
     stdio: 'ignore',
   })
@@ -581,9 +600,33 @@ test('Google Books: metadatos por ISBN con timeout y permisos', async () => {
   })
   assert.equal(encontrado.status, 200)
   assert.equal(encontrado.body.found, true)
+  assert.equal(encontrado.body.source, 'google')
   assert.match(encontrado.body.data.title, /Quijote/i)
   assert.match(encontrado.body.data.image, /^https:/)
   assert.ok(!encontrado.body.data.description.includes('<p>'))
+  assert.equal(lastGoogleKey, 'test-key')
+
+  const respaldoSinResultados = await request('/books/isbn/9780307474728', {
+    token: tokens.bibliotecario,
+  })
+  assert.equal(respaldoSinResultados.status, 200)
+  assert.equal(respaldoSinResultados.body.found, true)
+  assert.equal(respaldoSinResultados.body.source, 'local')
+  assert.match(respaldoSinResultados.body.data.title, /Cien a/i)
+
+  const respaldoPorCuota = await request('/books/isbn/9788417846184', {
+    token: tokens.bibliotecario,
+  })
+  assert.equal(respaldoPorCuota.status, 200)
+  assert.equal(respaldoPorCuota.body.found, true)
+  assert.equal(respaldoPorCuota.body.source, 'local')
+  assert.match(respaldoPorCuota.body.data.title, /infinito/i)
+
+  const inexistente = await request('/books/isbn/9780000000002', {
+    token: tokens.bibliotecario,
+  })
+  assert.equal(inexistente.status, 200)
+  assert.equal(inexistente.body.found, false)
 
   const invalido = await request('/books/isbn/abc', { token: tokens.bibliotecario })
   assert.equal(invalido.status, 400)
@@ -694,4 +737,84 @@ test('contenido: el bibliotecario edita bloques y trivias; el lector los recibe'
   const primera = await request('/reading/quijote/page/0', { token: tokens.estudiante })
   assert.equal(primera.body.paragraphs.length, 2)
   assert.equal(primera.body.trivia.correctOption, 'A')
+})
+
+test('actividades: guarda último intento, suma una sola vez y alimenta historial/reportes', async () => {
+  const incorrecta = await request('/reading/quijote/activity', {
+    method: 'POST',
+    token: tokens.estudiante,
+    body: { blockIndex: 0, type: 'trivia', answer: 'B' },
+  })
+  assert.equal(incorrecta.status, 201)
+  assert.equal(incorrecta.body.result.isCorrect, false)
+  assert.equal(incorrecta.body.totals.score, 0)
+
+  const correcta = await request('/reading/quijote/activity', {
+    method: 'POST',
+    token: tokens.estudiante,
+    body: { blockIndex: 0, type: 'trivia', answer: 'A' },
+  })
+  assert.equal(correcta.status, 201)
+  assert.equal(correcta.body.result.isCorrect, true)
+  assert.equal(correcta.body.totals.score, 100)
+  assert.equal(correcta.body.totals.answered, 1)
+
+  const repetida = await request('/reading/quijote/activity', {
+    method: 'POST',
+    token: tokens.estudiante,
+    body: { blockIndex: 0, type: 'trivia', answer: 'A' },
+  })
+  assert.equal(repetida.status, 201)
+  assert.equal(repetida.body.totals.score, 100)
+  assert.equal(repetida.body.totals.answered, 1)
+
+  const reflexion = await request('/reading/quijote/activity', {
+    method: 'POST',
+    token: tokens.estudiante,
+    body: {
+      blockIndex: 2,
+      type: 'reflection',
+      answer: 'Relaciono los molinos con las expectativas que no coinciden con los hechos.',
+    },
+  })
+  assert.equal(reflexion.status, 201)
+  assert.equal(reflexion.body.result.activityType, 'reflection')
+  assert.equal(reflexion.body.result.isCorrect, null)
+  assert.equal(reflexion.body.totals.answered, 2)
+  assert.equal(reflexion.body.totals.score, 150)
+
+  const guardadas = await request('/reading/quijote/activity', { token: tokens.estudiante })
+  assert.equal(guardadas.status, 200)
+  assert.equal(guardadas.body.activities.length, 2)
+  assert.equal(guardadas.body.totals.correct, 1)
+
+  const historial = await request('/history', { token: tokens.estudiante })
+  assert.equal(historial.status, 200)
+  assert.ok(historial.body.activities.some((item) => item.activityType === 'trivia'))
+  assert.ok(historial.body.activities.some((item) => item.activityType === 'reflection'))
+
+  const historialGlobal = await request('/history', { token: tokens.bibliotecario })
+  assert.ok(historialGlobal.body.activities.some((item) => item.user.id === users.estudiante.id))
+
+  const reporte = await request('/reports/activities', { token: tokens.bibliotecario })
+  assert.equal(reporte.status, 200)
+  const fila = reporte.body.rows.find(
+    (item) => item.user.id === users.estudiante.id && item.book.id === 'quijote'
+  )
+  assert.ok(fila)
+  assert.equal(fila.answered, 2)
+  assert.equal(fila.correct, 1)
+  assert.equal(fila.score, 150)
+  assert.ok(reporte.body.totals.answered >= 2)
+
+  const csv = await request('/reports/activities.csv', {
+    token: tokens.bibliotecario,
+    raw: true,
+  })
+  assert.equal(csv.status, 200)
+  assert.match(csv.text, /Actividades respondidas/)
+  assert.ok(csv.text.includes('Ana María Restrepo'))
+
+  const denegado = await request('/reports/activities', { token: tokens.estudiante })
+  assert.equal(denegado.status, 403)
 })

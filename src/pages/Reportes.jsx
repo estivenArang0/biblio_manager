@@ -30,11 +30,16 @@ function fecha(value) {
 }
 
 function Reportes() {
+  const [tipo, setTipo] = useState('prestamos')
   const [scope, setScope] = useState('estudiantes')
   const [from, setFrom] = useState('')
   const [to, setTo] = useState('')
   const [status, setStatus] = useState('')
   const [data, setData] = useState({ rows: [], totals: { total: 0, activos: 0, vencidos: 0, devueltos: 0 } })
+  const [activityData, setActivityData] = useState({
+    rows: [],
+    totals: { answered: 0, correct: 0, score: 0 },
+  })
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [exporting, setExporting] = useState(false)
@@ -43,15 +48,20 @@ function Reportes() {
 
   const cargar = useCallback(async () => {
     try {
-      const response = await api.report({ scope, from, to, status })
-      setData(response)
+      if (tipo === 'prestamos') {
+        const response = await api.report({ scope, from, to, status })
+        setData(response)
+      } else {
+        const response = await api.reportActivities({ from, to })
+        setActivityData(response)
+      }
       setError('')
     } catch (err) {
       setError(err.message || 'No se pudo generar el reporte.')
     } finally {
       setLoading(false)
     }
-  }, [scope, from, to, status])
+  }, [tipo, scope, from, to, status])
 
   useEffect(() => {
     // oxlint-disable-next-line react/set-state-in-effect -- filtros disparan la consulta al API
@@ -61,7 +71,8 @@ function Reportes() {
   const exportar = async () => {
     setExporting(true)
     try {
-      await api.downloadReportCsv(params)
+      if (tipo === 'prestamos') await api.downloadReportCsv(params)
+      else await api.downloadActivitiesCsv({ from, to })
     } catch (err) {
       setError(err.message || 'No se pudo exportar el CSV.')
     } finally {
@@ -69,7 +80,9 @@ function Reportes() {
     }
   }
 
-  if (loading && data.rows.length === 0) return <LoadingScreen label="Calculando reporte…" />
+  const vacio =
+    tipo === 'prestamos' ? data.rows.length === 0 && loading : activityData.rows.length === 0 && loading
+  if (vacio) return <LoadingScreen label="Calculando reporte…" />
 
   return (
     <div className="w-full px-3 sm:px-gutter py-space-lg flex flex-col gap-space-lg max-w-6xl mx-auto">
@@ -80,7 +93,9 @@ function Reportes() {
           </span>
           <h1 className="font-headline-lg text-headline-lg text-on-surface tracking-tight font-serif">Reportes</h1>
           <p className="font-body-md text-body-md text-on-surface-variant max-w-2xl">
-            Préstamos por estudiantes, docentes y todos los usuarios registrados, con filtros de fecha y estado.
+            {tipo === 'prestamos'
+              ? 'Préstamos por estudiantes, docentes y todos los usuarios registrados, con filtros de fecha y estado.'
+              : 'Resultados de trivias y reflexiones por usuario y libro, con filtro por fecha.'}
           </p>
         </div>
         <button
@@ -95,26 +110,65 @@ function Reportes() {
       </header>
 
       <div className="flex items-center gap-1 p-1 rounded-lg bg-surface-container-low w-full sm:w-fit overflow-x-auto">
-        {SCOPE_TABS.map((tab) => (
-          <button
-            key={tab.key}
-            type="button"
-            onClick={() => setScope(tab.key)}
-            className={`min-h-[44px] px-3 rounded-md text-xs font-semibold whitespace-nowrap ${
-              scope === tab.key ? 'bg-surface-container-lowest shadow-sm text-on-surface' : 'text-on-surface-variant'
-            }`}
-          >
-            {tab.label}
-          </button>
-        ))}
+        <button
+          type="button"
+          data-testid="reporte-prestamos"
+          onClick={() => setTipo('prestamos')}
+          className={`min-h-[44px] px-3 rounded-md text-xs font-semibold whitespace-nowrap ${
+            tipo === 'prestamos'
+              ? 'bg-surface-container-lowest shadow-sm text-on-surface'
+              : 'text-on-surface-variant'
+          }`}
+        >
+          Préstamos
+        </button>
+        <button
+          type="button"
+          data-testid="reporte-actividades"
+          onClick={() => setTipo('actividades')}
+          className={`min-h-[44px] px-3 rounded-md text-xs font-semibold whitespace-nowrap ${
+            tipo === 'actividades'
+              ? 'bg-surface-container-lowest shadow-sm text-on-surface'
+              : 'text-on-surface-variant'
+          }`}
+        >
+          Resultados de actividades
+        </button>
       </div>
 
-      <section className="grid grid-cols-2 sm:grid-cols-4 gap-2 sm:gap-space-sm">
-        <Total label="Total" value={data.totals.total} tone="text-on-surface" />
-        <Total label="Activos" value={data.totals.activos} tone="text-green-700" />
-        <Total label="Vencidos" value={data.totals.vencidos} tone="text-red-700" />
-        <Total label="Devueltos" value={data.totals.devueltos} tone="text-on-surface-variant" />
-      </section>
+      {tipo === 'prestamos' && (
+        <div className="flex items-center gap-1 p-1 rounded-lg bg-surface-container-low w-full sm:w-fit overflow-x-auto">
+          {SCOPE_TABS.map((tab) => (
+            <button
+              key={tab.key}
+              type="button"
+              onClick={() => setScope(tab.key)}
+              className={`min-h-[44px] px-3 rounded-md text-xs font-semibold whitespace-nowrap ${
+                scope === tab.key
+                  ? 'bg-surface-container-lowest shadow-sm text-on-surface'
+                  : 'text-on-surface-variant'
+              }`}
+            >
+              {tab.label}
+            </button>
+          ))}
+        </div>
+      )}
+
+      {tipo === 'prestamos' ? (
+        <section className="grid grid-cols-2 sm:grid-cols-4 gap-2 sm:gap-space-sm">
+          <Total label="Total" value={data.totals.total} tone="text-on-surface" />
+          <Total label="Activos" value={data.totals.activos} tone="text-green-700" />
+          <Total label="Vencidos" value={data.totals.vencidos} tone="text-red-700" />
+          <Total label="Devueltos" value={data.totals.devueltos} tone="text-on-surface-variant" />
+        </section>
+      ) : (
+        <section className="grid grid-cols-3 gap-2 sm:gap-space-sm">
+          <Total label="Actividades" value={activityData.totals.answered} tone="text-on-surface" />
+          <Total label="Aciertos trivia" value={activityData.totals.correct} tone="text-green-700" />
+          <Total label="Puntaje total" value={activityData.totals.score} tone="text-secondary" />
+        </section>
+      )}
 
       <section className="bg-surface-container-lowest rounded-xl border border-outline-variant/25 p-3 sm:p-4 grid grid-cols-1 sm:grid-cols-3 gap-space-sm">
         <div className="flex flex-col gap-1">
@@ -143,23 +197,25 @@ function Reportes() {
             className="min-h-[44px] px-3 rounded-lg bg-surface-container-low text-on-surface text-xs focus:outline-none"
           />
         </div>
-        <div className="flex flex-col gap-1">
-          <label className="text-[11px] font-semibold text-on-surface-variant" htmlFor="estado-filtro">
-            Estado
-          </label>
-          <select
-            id="estado-filtro"
-            value={status}
-            onChange={(event) => setStatus(event.target.value)}
-            className="min-h-[44px] px-3 rounded-lg bg-surface-container-low text-on-surface text-xs focus:outline-none cursor-pointer"
-          >
-            {ESTADOS.map((option) => (
-              <option key={option.value} value={option.value}>
-                {option.label}
-              </option>
-            ))}
-          </select>
-        </div>
+        {tipo === 'prestamos' && (
+          <div className="flex flex-col gap-1">
+            <label className="text-[11px] font-semibold text-on-surface-variant" htmlFor="estado-filtro">
+              Estado
+            </label>
+            <select
+              id="estado-filtro"
+              value={status}
+              onChange={(event) => setStatus(event.target.value)}
+              className="min-h-[44px] px-3 rounded-lg bg-surface-container-low text-on-surface text-xs focus:outline-none cursor-pointer"
+            >
+              {ESTADOS.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+          </div>
+        )}
       </section>
 
       {error && (
@@ -169,58 +225,102 @@ function Reportes() {
         </div>
       )}
 
-      <section className="bg-surface-container-lowest rounded-xl border border-outline-variant/25 overflow-hidden">
-        <div className="overflow-x-auto">
-          <table className="w-full min-w-[860px] text-left text-xs">
-            <thead className="bg-surface-container-low text-on-surface-variant">
-              <tr>
-                <th className="px-3 py-2 font-semibold">Usuario</th>
-                <th className="px-3 py-2 font-semibold">Rol</th>
-                <th className="px-3 py-2 font-semibold">Libro</th>
-                <th className="px-3 py-2 font-semibold">Préstamo</th>
-                <th className="px-3 py-2 font-semibold">Límite</th>
-                <th className="px-3 py-2 font-semibold">Devolución</th>
-                <th className="px-3 py-2 font-semibold">Estado</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-outline-variant/20">
-              {data.rows.length === 0 ? (
+      {tipo === 'prestamos' ? (
+        <section className="bg-surface-container-lowest rounded-xl border border-outline-variant/25 overflow-hidden">
+          <div className="overflow-x-auto">
+            <table className="w-full min-w-[860px] text-left text-xs">
+              <thead className="bg-surface-container-low text-on-surface-variant">
                 <tr>
-                  <td colSpan={7} className="px-3 py-10 text-center text-on-surface-variant">
-                    No hay préstamos que coincidan con los filtros.
-                  </td>
+                  <th className="px-3 py-2 font-semibold">Usuario</th>
+                  <th className="px-3 py-2 font-semibold">Rol</th>
+                  <th className="px-3 py-2 font-semibold">Libro</th>
+                  <th className="px-3 py-2 font-semibold">Préstamo</th>
+                  <th className="px-3 py-2 font-semibold">Límite</th>
+                  <th className="px-3 py-2 font-semibold">Devolución</th>
+                  <th className="px-3 py-2 font-semibold">Estado</th>
                 </tr>
-              ) : (
-                data.rows.map((row) => (
-                  <tr key={row.id} className="hover:bg-surface-container-low/60">
-                    <td className="px-3 py-2">
-                      <span className="block font-semibold text-on-surface">{row.user.nombre}</span>
-                      <span className="block text-[10px] text-on-surface-variant">{row.user.correo}</span>
-                    </td>
-                    <td className="px-3 py-2 whitespace-nowrap">{row.user.rol}</td>
-                    <td className="px-3 py-2">
-                      <span className="block text-on-surface">{row.book.title}</span>
-                      <span className="block text-[10px] text-on-surface-variant">{row.book.author}</span>
-                    </td>
-                    <td className="px-3 py-2 whitespace-nowrap">{fecha(row.loanDate)}</td>
-                    <td className="px-3 py-2 whitespace-nowrap">{fecha(row.dueDate)}</td>
-                    <td className="px-3 py-2 whitespace-nowrap">{fecha(row.returnedAt)}</td>
-                    <td className="px-3 py-2">
-                      <span
-                        className={`inline-block px-2 py-0.5 rounded-full border text-[10px] font-semibold ${
-                          estadoClase[row.status] || estadoClase.devuelto
-                        }`}
-                      >
-                        {estadoTexto[row.status] || row.status}
-                      </span>
+              </thead>
+              <tbody className="divide-y divide-outline-variant/20">
+                {data.rows.length === 0 ? (
+                  <tr>
+                    <td colSpan={7} className="px-3 py-10 text-center text-on-surface-variant">
+                      No hay préstamos que coincidan con los filtros.
                     </td>
                   </tr>
-                ))
-              )}
-            </tbody>
-          </table>
-        </div>
-      </section>
+                ) : (
+                  data.rows.map((row) => (
+                    <tr key={row.id} className="hover:bg-surface-container-low/60">
+                      <td className="px-3 py-2">
+                        <span className="block font-semibold text-on-surface">{row.user.nombre}</span>
+                        <span className="block text-[10px] text-on-surface-variant">{row.user.correo}</span>
+                      </td>
+                      <td className="px-3 py-2 whitespace-nowrap">{row.user.rol}</td>
+                      <td className="px-3 py-2">
+                        <span className="block text-on-surface">{row.book.title}</span>
+                        <span className="block text-[10px] text-on-surface-variant">{row.book.author}</span>
+                      </td>
+                      <td className="px-3 py-2 whitespace-nowrap">{fecha(row.loanDate)}</td>
+                      <td className="px-3 py-2 whitespace-nowrap">{fecha(row.dueDate)}</td>
+                      <td className="px-3 py-2 whitespace-nowrap">{fecha(row.returnedAt)}</td>
+                      <td className="px-3 py-2">
+                        <span
+                          className={`inline-block px-2 py-0.5 rounded-full border text-[10px] font-semibold ${
+                            estadoClase[row.status] || estadoClase.devuelto
+                          }`}
+                        >
+                          {estadoTexto[row.status] || row.status}
+                        </span>
+                      </td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </div>
+        </section>
+      ) : (
+        <section className="bg-surface-container-lowest rounded-xl border border-outline-variant/25 overflow-hidden">
+          <div className="overflow-x-auto">
+            <table className="w-full min-w-[760px] text-left text-xs" data-testid="tabla-actividades">
+              <thead className="bg-surface-container-low text-on-surface-variant">
+                <tr>
+                  <th className="px-3 py-2 font-semibold">Usuario</th>
+                  <th className="px-3 py-2 font-semibold">Rol</th>
+                  <th className="px-3 py-2 font-semibold">Libro</th>
+                  <th className="px-3 py-2 font-semibold">Actividades</th>
+                  <th className="px-3 py-2 font-semibold">Aciertos trivia</th>
+                  <th className="px-3 py-2 font-semibold">Puntaje total</th>
+                  <th className="px-3 py-2 font-semibold">Última</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-outline-variant/20">
+                {activityData.rows.length === 0 ? (
+                  <tr>
+                    <td colSpan={7} className="px-3 py-10 text-center text-on-surface-variant">
+                      No hay actividades que coincidan con los filtros.
+                    </td>
+                  </tr>
+                ) : (
+                  activityData.rows.map((row) => (
+                    <tr key={`${row.user.id}-${row.book.id}`} className="hover:bg-surface-container-low/60">
+                      <td className="px-3 py-2">
+                        <span className="block font-semibold text-on-surface">{row.user.nombre}</span>
+                        <span className="block text-[10px] text-on-surface-variant">{row.user.correo}</span>
+                      </td>
+                      <td className="px-3 py-2 whitespace-nowrap">{row.user.rol}</td>
+                      <td className="px-3 py-2">{row.book.title}</td>
+                      <td className="px-3 py-2 font-semibold">{row.answered}</td>
+                      <td className="px-3 py-2">{row.correct}</td>
+                      <td className="px-3 py-2 font-semibold text-secondary">{row.score}</td>
+                      <td className="px-3 py-2 whitespace-nowrap">{fecha(row.lastAt)}</td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </div>
+        </section>
+      )}
 
       {loading && <p className="text-xs text-on-surface-variant">Actualizando…</p>}
     </div>

@@ -1,5 +1,17 @@
-import { createServer } from './app.js'
-import { dbPath } from './db.js'
+import { loadEnvFile } from 'node:process'
+
+// Carga .env para `npm run dev`/`npm run server`. En pruebas BIBLIO_DB ya viene
+// definido y no se toca el entorno.
+if (!process.env.BIBLIO_DB) {
+  try {
+    loadEnvFile(new URL('../.env', import.meta.url))
+  } catch {
+    /* .env es opcional */
+  }
+}
+
+const { createServer } = await import('./app.js')
+const { dbPath } = await import('./db.js')
 
 const port = Number(process.env.PORT || 4000)
 const server = createServer()

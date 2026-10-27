@@ -34,7 +34,7 @@ function fechaHora(value) {
 function Historial() {
   const { user } = useAuth()
   const [tab, setTab] = useState('prestamos')
-  const [data, setData] = useState({ loans: [], events: [], scope: 'personal' })
+  const [data, setData] = useState({ loans: [], events: [], activities: [], scope: 'personal' })
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
 
@@ -71,8 +71,8 @@ function Historial() {
         </h1>
         <p className="font-body-md text-body-md text-on-surface-variant max-w-2xl">
           {global
-            ? 'Préstamos y aperturas de lectura registradas en todo el sistema.'
-            : `Actividad de ${user?.nombre || 'tu cuenta'}: préstamos y sesiones de lectura.`}
+            ? 'Préstamos, aperturas de lectura y resultados de actividades de todo el sistema.'
+            : `Actividad de ${user?.nombre || 'tu cuenta'}: préstamos, sesiones y resultados de actividades.`}
         </p>
       </header>
 
@@ -105,6 +105,19 @@ function Historial() {
         >
           <span className="material-symbols-outlined text-base">menu_book</span>
           Lectura ({data.events.length})
+        </button>
+        <button
+          type="button"
+          data-testid="tab-actividades"
+          onClick={() => setTab('actividades')}
+          className={`flex-1 sm:flex-none min-h-[44px] px-3 rounded-md text-xs font-semibold flex items-center justify-center gap-1.5 ${
+            tab === 'actividades'
+              ? 'bg-surface-container-lowest shadow-sm text-on-surface'
+              : 'text-on-surface-variant'
+          }`}
+        >
+          <span className="material-symbols-outlined text-base">quiz</span>
+          Actividades ({(data.activities || []).length})
         </button>
       </div>
 
@@ -193,6 +206,66 @@ function Historial() {
                 <span className="text-[10px] font-mono text-on-surface-variant">Folio digital</span>
               </div>
             ))
+          )}
+        </section>
+      )}
+
+      {tab === 'actividades' && (
+        <section className="bg-surface-container-lowest rounded-xl border border-outline-variant/25 divide-y divide-outline-variant/20">
+          {(data.activities || []).length === 0 ? (
+            <p className="p-8 text-center text-on-surface-variant text-sm">
+              Aún no hay resultados de actividades registrados.
+            </p>
+          ) : (
+            data.activities.map((activity) => {
+              const esTrivia = activity.activityType === 'trivia'
+              const correcta = activity.isCorrect === true
+              return (
+                <div key={activity.id} className="p-3 flex items-start gap-3">
+                  <span
+                    className={`w-9 h-9 rounded-full flex items-center justify-center shrink-0 ${
+                      esTrivia
+                        ? correcta
+                          ? 'bg-green-100 text-green-800'
+                          : 'bg-red-100 text-red-800'
+                        : 'bg-blue-50 text-blue-800'
+                    }`}
+                  >
+                    <span className="material-symbols-outlined text-base">
+                      {esTrivia ? (correcta ? 'check_circle' : 'cancel') : 'edit_note'}
+                    </span>
+                  </span>
+                  <div className="min-w-0 flex-1">
+                    <p className="text-xs font-semibold text-on-surface">
+                      {esTrivia ? 'Trivia' : 'Reflexión'} · Bloque {activity.block}{' '}
+                      <span className="font-normal text-on-surface-variant">«{activity.title}»</span>
+                    </p>
+                    {global && activity.user && (
+                      <p className="text-[10px] text-on-surface-variant">
+                        {activity.user.nombre} · {activity.user.rol}
+                      </p>
+                    )}
+                    <p className="text-[10px] text-on-surface-variant line-clamp-2 mt-0.5">
+                      Respuesta: {activity.answer}
+                    </p>
+                    <p className="text-[10px] text-on-surface-variant">
+                      {fechaHora(activity.at)} · {activity.score} pts
+                    </p>
+                  </div>
+                  <span
+                    className={`shrink-0 text-[10px] px-2 py-0.5 rounded-full border font-semibold ${
+                      esTrivia
+                        ? correcta
+                          ? 'bg-green-100 text-green-800 border-green-200'
+                          : 'bg-red-100 text-red-800 border-red-200'
+                        : 'bg-blue-50 text-blue-800 border-blue-200'
+                    }`}
+                  >
+                    {esTrivia ? (correcta ? 'Correcta' : 'Incorrecta') : 'Reflexión'}
+                  </span>
+                </div>
+              )
+            })
           )}
         </section>
       )}
