@@ -25,7 +25,9 @@ function migrate(db) {
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       nombre TEXT NOT NULL,
       correo TEXT NOT NULL UNIQUE COLLATE NOCASE,
-      rol TEXT NOT NULL CHECK (rol IN ('Estudiante','Docente','Bibliotecario','Administrador')),
+      rol TEXT NOT NULL CHECK (rol IN ('Lector','Bibliotecario')),
+      tipo_lector TEXT CHECK (tipo_lector IN ('estudiante','docente')),
+      active INTEGER NOT NULL DEFAULT 1,
       password_hash TEXT NOT NULL,
       created_at TEXT NOT NULL
     );
@@ -117,6 +119,21 @@ function migrate(db) {
       read_at TEXT
     );
 
+    CREATE TABLE IF NOT EXISTS favorites (
+      user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      book_id TEXT NOT NULL REFERENCES books(id) ON DELETE CASCADE,
+      created_at TEXT NOT NULL,
+      PRIMARY KEY (user_id, book_id)
+    );
+
+    CREATE TABLE IF NOT EXISTS reading_progress (
+      user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      book_id TEXT NOT NULL REFERENCES books(id) ON DELETE CASCADE,
+      page INTEGER NOT NULL DEFAULT 0,
+      updated_at TEXT NOT NULL,
+      PRIMARY KEY (user_id, book_id)
+    );
+
     CREATE INDEX IF NOT EXISTS idx_sessions_user ON sessions(user_id);
     CREATE INDEX IF NOT EXISTS idx_loans_user ON loans(user_id);
     CREATE INDEX IF NOT EXISTS idx_loans_book ON loans(book_id);
@@ -140,6 +157,55 @@ function migrate(db) {
   if (!bookColumns.some((column) => column.name === 'copies_available')) {
     db.exec('ALTER TABLE books ADD COLUMN copies_available INTEGER NOT NULL DEFAULT 3')
   }
+
+  // Migración de roles antiguos (Estudiante/Docente/Administrador) a Lector/Bibliotecario.
+  const usersSql =
+    db.prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'users'").get()?.sql ||
+    ''
+  if (!usersSql.includes('tipo_lector') || usersSql.includes('Administrador')) {
+    db.exec('PRAGMA foreign_keys = OFF')
+    db.exec('BEGIN')
+    try {
+      db.exec('DROP TABLE IF EXISTS users_new')
+      db.exec(`
+        CREATE TABLE users_new (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          nombre TEXT NOT NULL,
+          correo TEXT NOT NULL UNIQUE COLLATE NOCASE,
+          rol TEXT NOT NULL CHECK (rol IN ('Lector','Bibliotecario')),
+          tipo_lector TEXT CHECK (tipo_lector IN ('estudiante','docente')),
+          active INTEGER NOT NULL DEFAULT 1,
+          password_hash TEXT NOT NULL,
+          created_at TEXT NOT NULL
+        )
+      `)
+      db.exec(`
+        INSERT INTO users_new (id, nombre, correo, rol, tipo_lector, active, password_hash, created_at)
+        SELECT id,
+               nombre,
+               CASE WHEN lower(correo) = 'admin@tdea.edu.co'
+                    THEN 'coordinacion.biblioteca@tdea.edu.co'
+                    ELSE correo END,
+               CASE WHEN rol IN ('Estudiante','Docente') THEN 'Lector' ELSE 'Bibliotecario' END,
+               CASE WHEN rol = 'Docente' THEN 'docente'
+                    WHEN rol = 'Estudiante' THEN 'estudiante'
+                    ELSE NULL END,
+               1,
+               password_hash,
+               created_at
+          FROM users
+      `)
+      db.exec('DROP TABLE users')
+      db.exec('ALTER TABLE users_new RENAME TO users')
+      db.exec('COMMIT')
+    } catch (error) {
+      db.exec('ROLLBACK')
+      throw error
+    } finally {
+      db.exec('PRAGMA foreign_keys = ON')
+    }
+  }
+  db.prepare("UPDATE users SET nombre = 'Coordinación de Biblioteca' WHERE nombre = 'Administrador TdeA'").run()
 }
 
 function seed(db) {
@@ -148,11 +214,11 @@ function seed(db) {
 
   const now = new Date().toISOString()
   const insertUser = db.prepare(
-    'INSERT INTO users (nombre, correo, rol, password_hash, created_at) VALUES (?, ?, ?, ?, ?)'
+    'INSERT INTO users (nombre, correo, rol, tipo_lector, active, password_hash, created_at) VALUES (?, ?, ?, ?, 1, ?, ?)'
   )
   const passwordHash = hashPassword(DEMO_PASSWORD)
   for (const user of seedUsers) {
-    insertUser.run(user.nombre, user.correo, user.rol, passwordHash, now)
+    insertUser.run(user.nombre, user.correo, user.rol, user.tipoLector || null, passwordHash, now)
   }
 
   const seedLoans = buildSeedLoans()
@@ -219,7 +285,7 @@ function seed(db) {
     insertEvent.run(userId.get(event.user), event.book, event.event, event.at)
   }
 
-  const adminId = userId.get('admin@tdea.edu.co')
+  const adminId = userId.get('bibliotecario.central@tdea.edu.co')
   const studentId = userId.get('estudiante@tdea.edu.co')
   if (adminId && studentId) {
     db.prepare(

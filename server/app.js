@@ -5,7 +5,6 @@ import { getDb } from './db.js'
 import { buildGenericPages } from './seed.js'
 import {
   READERS,
-  ROLES,
   STAFF,
   addDays,
   csvEscape,
@@ -97,7 +96,8 @@ function sessionUser(req) {
   if (!token) return null
   const row = db
     .prepare(
-      `SELECT u.id, u.nombre, u.correo, u.rol, s.expires_at, s.last_seen_at, s.created_at
+      `SELECT u.id, u.nombre, u.correo, u.rol, u.tipo_lector, u.active,
+              s.expires_at, s.last_seen_at, s.created_at
          FROM sessions s JOIN users u ON u.id = s.user_id
         WHERE s.token = ?`
     )
@@ -113,12 +113,30 @@ function sessionUser(req) {
     db.prepare('DELETE FROM sessions WHERE token = ?').run(token)
     throw httpError(401, 'Tu sesión venció por inactividad.', { code: 'SESSION_IDLE' })
   }
+  if (Number(row.active) === 0) {
+    db.prepare('DELETE FROM sessions WHERE token = ?').run(token)
+    throw httpError(401, 'Tu cuenta está desactivada.')
+  }
   db.prepare('UPDATE sessions SET last_seen_at = ? WHERE token = ?').run(nowISO(), token)
-  return { id: row.id, nombre: row.nombre, correo: row.correo, rol: row.rol, token }
+  return {
+    id: row.id,
+    nombre: row.nombre,
+    correo: row.correo,
+    rol: row.rol,
+    tipoLector: row.tipo_lector || null,
+    token,
+  }
 }
 
 function publicUser(row) {
-  return { id: row.id, nombre: row.nombre, correo: row.correo, rol: row.rol }
+  return {
+    id: row.id,
+    nombre: row.nombre,
+    correo: row.correo,
+    rol: row.rol,
+    tipoLector: row.tipo_lector || null,
+    active: Number(row.active ?? 1) === 1,
+  }
 }
 
 function createSession(userId) {
@@ -148,7 +166,7 @@ function parsePages(row) {
 function availabilityLabel(book) {
   if (Number(book.copies_available) <= 0) return 'Sin ejemplares disponibles'
   if (book.digital && book.physical) return 'Digital y físico'
-  if (book.digital) return 'Préstamo digital'
+  if (book.digital) return 'Digital disponible'
   return 'Físico · retiro en biblioteca'
 }
 
@@ -166,7 +184,7 @@ function loanDto(row, options = {}) {
   const user = options.user
     ? options.user
     : db
-        .prepare('SELECT id, nombre, correo, rol FROM users WHERE id = ?')
+        .prepare('SELECT id, nombre, correo, rol, tipo_lector FROM users WHERE id = ?')
         .get(row.user_id)
   const today = ymd()
   return {
@@ -187,7 +205,13 @@ function loanDto(row, options = {}) {
     requestedDays: row.requested_days || null,
     daysLeft: row.due_date ? diffDays(today, row.due_date) : null,
     user: user
-      ? { id: user.id, nombre: user.nombre, correo: user.correo, rol: user.rol }
+      ? {
+          id: user.id,
+          nombre: user.nombre,
+          correo: user.correo,
+          rol: user.rol,
+          tipoLector: user.tipo_lector || user.tipoLector || null,
+        }
       : null,
   }
 }
@@ -225,6 +249,14 @@ function bookDto(row, user) {
     pageCount: parsePages(row).length,
     availabilityLabel: availabilityLabel(row),
     myLoan: user && READERS.includes(user.rol) ? myLoanFor(user.id, row.id) : null,
+    isFavorite:
+      user && READERS.includes(user.rol)
+        ? Boolean(
+            db
+              .prepare('SELECT 1 FROM favorites WHERE user_id = ? AND book_id = ?')
+              .get(user.id, row.id)
+          )
+        : false,
   }
 }
 
@@ -238,9 +270,6 @@ function activeLoanFor(userId, bookId) {
 function requireReadingAccess(user, bookId) {
   const book = db.prepare('SELECT * FROM books WHERE id = ?').get(bookId)
   if (!book) throw httpError(404, 'El libro no existe.')
-  if (!book.digital) {
-    throw httpError(403, 'Este ejemplar solo está disponible en físico, no para lectura digital.')
-  }
   const loan = activeLoanFor(user.id, bookId)
   if (!loan) {
     throw httpError(403, 'No tienes un préstamo activo y vigente de este libro.')
@@ -372,18 +401,21 @@ function activityDto(row, book) {
     activityType: row.activity_type,
     answer: row.answer,
     isCorrect: row.is_correct === null || row.is_correct === undefined ? null : Boolean(row.is_correct),
-    score: Number(row.score),
     at: row.updated_at,
     createdAt: row.created_at,
   }
 }
 
 function activityTotals(userId, bookId) {
+  const book = db.prepare('SELECT pages_json FROM books WHERE id = ?').get(bookId)
+  const pages = book ? parsePages(book) : []
+  const totalTrivias = pages.filter(
+    (page) => page.trivia && page.trivia.type !== 'reflection' && page.trivia.options?.length
+  ).length
   const row = db
     .prepare(
       `SELECT COUNT(*) AS answered,
-              COALESCE(SUM(CASE WHEN activity_type = 'trivia' AND is_correct = 1 THEN 1 ELSE 0 END), 0) AS correct,
-              COALESCE(SUM(score), 0) AS score
+              COALESCE(SUM(CASE WHEN activity_type = 'trivia' AND is_correct = 1 THEN 1 ELSE 0 END), 0) AS correct
          FROM activity_results
         WHERE user_id = ? AND book_id = ?`
     )
@@ -391,7 +423,7 @@ function activityTotals(userId, bookId) {
   return {
     answered: Number(row.answered),
     correct: Number(row.correct),
-    score: Number(row.score),
+    totalTrivias,
   }
 }
 
@@ -407,9 +439,9 @@ function messageDto(row, currentUserId) {
   }
 }
 
-function adminIds() {
+function staffIds() {
   return db
-    .prepare("SELECT id FROM users WHERE rol = 'Administrador'")
+    .prepare("SELECT id FROM users WHERE rol = 'Bibliotecario'")
     .all()
     .map((row) => row.id)
 }
@@ -448,9 +480,9 @@ function buildReportRows({ scope = 'todos', from = '', to = '', status = '' } = 
   const clauses = ['l.loan_date IS NOT NULL']
   const params = []
   if (scope === 'estudiantes') {
-    clauses.push("u.rol = 'Estudiante'")
+    clauses.push("u.rol = 'Lector' AND u.tipo_lector = 'estudiante'")
   } else if (scope === 'docentes') {
-    clauses.push("u.rol = 'Docente'")
+    clauses.push("u.rol = 'Lector' AND u.tipo_lector = 'docente'")
   }
   if (from) {
     clauses.push('l.loan_date >= ?')
@@ -463,6 +495,7 @@ function buildReportRows({ scope = 'todos', from = '', to = '', status = '' } = 
   const rows = db
     .prepare(
       `SELECT l.*, u.nombre AS user_nombre, u.correo AS user_correo, u.rol AS user_rol,
+              u.tipo_lector AS user_tipo,
               b.title, b.author, b.image
          FROM loans l
          JOIN users u ON u.id = l.user_id
@@ -479,6 +512,7 @@ function buildReportRows({ scope = 'todos', from = '', to = '', status = '' } = 
       nombre: row.user_nombre,
       correo: row.user_correo,
       rol: row.user_rol,
+      tipoLector: row.user_tipo || null,
     },
     book: { id: row.book_id, title: row.title, author: row.author, image: row.image },
     loanDate: row.loan_date,
@@ -511,18 +545,17 @@ function buildActivityReport({ from = '', to = '' } = {}) {
   const where = clauses.length ? `WHERE ${clauses.join(' AND ')}` : ''
   const rows = db
     .prepare(
-      `SELECT u.id AS user_id, u.nombre, u.correo, u.rol,
+      `SELECT u.id AS user_id, u.nombre, u.correo, u.rol, u.tipo_lector,
               b.id AS book_id, b.title,
               COUNT(*) AS answered,
               COALESCE(SUM(CASE WHEN a.activity_type = 'trivia' AND a.is_correct = 1 THEN 1 ELSE 0 END), 0) AS correct,
-              COALESCE(SUM(a.score), 0) AS score,
               MAX(a.updated_at) AS last_at
          FROM activity_results a
          JOIN users u ON u.id = a.user_id
          JOIN books b ON b.id = a.book_id
          ${where}
         GROUP BY u.id, b.id
-        ORDER BY score DESC, u.nombre COLLATE NOCASE, b.title COLLATE NOCASE`
+        ORDER BY correct DESC, u.nombre COLLATE NOCASE, b.title COLLATE NOCASE`
     )
     .all(...params)
     .map((row) => ({
@@ -531,11 +564,11 @@ function buildActivityReport({ from = '', to = '' } = {}) {
         nombre: row.nombre,
         correo: row.correo,
         rol: row.rol,
+        tipoLector: row.tipo_lector || null,
       },
       book: { id: row.book_id, title: row.title },
       answered: Number(row.answered),
       correct: Number(row.correct),
-      score: Number(row.score),
       lastAt: row.last_at,
     }))
   return {
@@ -543,7 +576,6 @@ function buildActivityReport({ from = '', to = '' } = {}) {
     totals: {
       answered: rows.reduce((total, row) => total + row.answered, 0),
       correct: rows.reduce((total, row) => total + row.correct, 0),
-      score: rows.reduce((total, row) => total + row.score, 0),
     },
   }
 }
@@ -596,6 +628,9 @@ route(
     const user = db.prepare('SELECT * FROM users WHERE correo = ?').get(correo)
     if (!user || !verifyPassword(password, user.password_hash)) {
       throw httpError(401, 'Credenciales inválidas. Verifica tu correo y contraseña.')
+    }
+    if (Number(user.active) === 0) {
+      throw httpError(401, 'Tu cuenta está desactivada. Contacta a la biblioteca.')
     }
     const token = createSession(user.id)
     return { token, user: publicUser(user) }
@@ -831,6 +866,53 @@ route('PUT', 'books/:id/content', STAFF, ({ params, body }) => {
   return { ok: true, blocks: pages.map(pageToBlock), total: pages.length }
 })
 
+/* --- Favoritos y notas --------------------------------------------- */
+
+route('GET', 'favorites', READERS, ({ user }) => {
+  const rows = db
+    .prepare(
+      `SELECT b.* FROM favorites f JOIN books b ON b.id = f.book_id
+        WHERE f.user_id = ? ORDER BY f.created_at DESC`
+    )
+    .all(user.id)
+  return { books: rows.map((row) => bookDto(row, user)) }
+})
+
+route('POST', 'favorites/:bookId', READERS, ({ params, user }) => {
+  const book = db.prepare('SELECT id FROM books WHERE id = ?').get(params.bookId)
+  if (!book) throw httpError(404, 'El libro no existe.')
+  db.prepare('INSERT OR IGNORE INTO favorites (user_id, book_id, created_at) VALUES (?, ?, ?)').run(
+    user.id,
+    book.id,
+    nowISO()
+  )
+  return { ok: true, favorite: true }
+})
+
+route('DELETE', 'favorites/:bookId', READERS, ({ params, user }) => {
+  db.prepare('DELETE FROM favorites WHERE user_id = ? AND book_id = ?').run(user.id, params.bookId)
+  return { ok: true, favorite: false }
+})
+
+route('GET', 'notes', READERS, ({ user }) => {
+  const rows = db
+    .prepare(
+      `SELECT h.*, b.title, b.author, b.image
+         FROM highlights h JOIN books b ON b.id = h.book_id
+        WHERE h.user_id = ? AND h.note IS NOT NULL AND TRIM(h.note) <> ''
+        ORDER BY h.updated_at DESC LIMIT 300`
+    )
+    .all(user.id)
+  return {
+    notes: rows.map((row) => ({
+      ...highlightDto(row),
+      title: row.title,
+      author: row.author,
+      image: row.image,
+    })),
+  }
+})
+
 /* --- Préstamos ----------------------------------------------------- */
 
 route('GET', 'loans/mine', READERS, ({ user }) => {
@@ -883,8 +965,8 @@ route('GET', 'loans/direct/options', STAFF, ({ query }) => {
 
   const users = db
     .prepare(
-      `SELECT id, nombre, correo, rol FROM users
-        WHERE rol IN ('Estudiante','Docente')
+      `SELECT id, nombre, correo, rol, tipo_lector FROM users
+        WHERE rol = 'Lector' AND active = 1
         ORDER BY nombre COLLATE NOCASE`
     )
     .all()
@@ -983,7 +1065,7 @@ route('POST', 'loans', READERS, ({ body, user }) => {
       throw httpError(409, 'Ya tienes un préstamo de este libro.')
     }
   }
-  const days = user.rol === 'Docente' ? 30 : 8
+  const days = 8
   const info = db
     .prepare(
       `INSERT INTO loans (book_id, user_id, status, requested_days, created_at)
@@ -998,8 +1080,7 @@ route('PATCH', 'loans/:id/approve', STAFF, ({ params, user }) => {
   const loan = db.prepare('SELECT * FROM loans WHERE id = ?').get(Number(params.id))
   if (!loan) throw httpError(404, 'El préstamo no existe.')
   if (loan.status !== 'pendiente') throw httpError(409, 'Solo se pueden aprobar solicitudes pendientes.')
-  const borrower = db.prepare('SELECT * FROM users WHERE id = ?').get(loan.user_id)
-  const days = loan.requested_days || (borrower?.rol === 'Docente' ? 30 : 8)
+  const days = loan.requested_days || 8
   const today = ymd()
   withTransaction(() => {
     takeCopy(loan.book_id)
@@ -1034,7 +1115,7 @@ route('GET', 'reading/loans', READERS, ({ user }) => {
     .prepare(
       `SELECT l.*, b.title, b.author, b.image, b.signature, b.format, b.digital, b.physical
          FROM loans l JOIN books b ON b.id = l.book_id
-        WHERE l.user_id = ? AND b.digital = 1
+        WHERE l.user_id = ?
         ORDER BY l.id DESC`
     )
     .all(user.id)
@@ -1042,6 +1123,56 @@ route('GET', 'reading/loans', READERS, ({ user }) => {
     .map((row) => loanDto(row, { user }))
     .filter((loan) => loan.status === 'activo')
   return { loans }
+})
+
+route('GET', 'reading/comprehension', READERS, ({ user }) => {
+  const books = db
+    .prepare(
+      `SELECT DISTINCT b.*
+         FROM books b
+         LEFT JOIN loans l ON l.book_id = b.id AND l.user_id = ?
+         LEFT JOIN activity_results a ON a.book_id = b.id AND a.user_id = ?
+        WHERE l.id IS NOT NULL OR a.id IS NOT NULL
+        ORDER BY b.title COLLATE NOCASE`
+    )
+    .all(user.id, user.id)
+  const rows = books.map((book) => {
+    const pages = parsePages(book)
+    const activities = db
+      .prepare('SELECT activity_type, is_correct FROM activity_results WHERE user_id = ? AND book_id = ?')
+      .all(user.id, book.id)
+    const totalTrivias = pages.filter(
+      (page) => page.trivia && page.trivia.type !== 'reflection' && page.trivia.options?.length
+    ).length
+    const correct = activities.filter(
+      (activity) => activity.activity_type === 'trivia' && activity.is_correct === 1
+    ).length
+    const percentage = totalTrivias ? Math.round((correct / totalTrivias) * 100) : 0
+    const message =
+      percentage >= 80
+        ? 'Muy buena comprensión lectora'
+        : percentage >= 60
+          ? 'Buena comprensión lectora'
+          : percentage >= 40
+            ? 'Comprensión en proceso'
+            : 'Necesitas reforzar la lectura'
+    return {
+      book: {
+        id: book.id,
+        title: book.title,
+        author: book.author,
+        image: book.image,
+        format: book.format,
+      },
+      answered: activities.length,
+      totalBlocks: pages.length,
+      totalTrivias,
+      correct,
+      percentage,
+      message,
+    }
+  })
+  return { books: rows }
 })
 
 route('GET', 'reading/:bookId', READERS, ({ params, user }) => {
@@ -1059,6 +1190,50 @@ route('GET', 'reading/:bookId', READERS, ({ params, user }) => {
     pages,
     total: pages.length,
     user: { nombre: user.nombre, correo: user.correo },
+  }
+})
+
+route('POST', 'reading/:bookId/progress', READERS, ({ params, body, user }) => {
+  const { book } = requireReadingAccess(user, params.bookId)
+  const pages = parsePages(book)
+  const page = Number(body.page)
+  if (!Number.isInteger(page) || page < 0 || page >= pages.length) {
+    throw httpError(400, 'La página indicada no existe.')
+  }
+  db.prepare(
+    `INSERT INTO reading_progress (user_id, book_id, page, updated_at)
+     VALUES (?, ?, ?, ?)
+     ON CONFLICT(user_id, book_id) DO UPDATE SET page = excluded.page, updated_at = excluded.updated_at`
+  ).run(user.id, book.id, page, nowISO())
+  return { ok: true, page }
+})
+
+route('GET', 'reading/:bookId/progress', READERS, ({ params, user }) => {
+  const loan = db
+    .prepare('SELECT * FROM loans WHERE user_id = ? AND book_id = ? ORDER BY id DESC LIMIT 1')
+    .get(user.id, params.bookId)
+  if (!loan) throw httpError(404, 'No tienes un préstamo de este libro.')
+  const book = db.prepare('SELECT * FROM books WHERE id = ?').get(params.bookId)
+  if (!book) throw httpError(404, 'El libro no existe.')
+  const pages = parsePages(book)
+  const progress = db
+    .prepare('SELECT * FROM reading_progress WHERE user_id = ? AND book_id = ?')
+    .get(user.id, params.bookId)
+  const lastPage = progress ? Number(progress.page) : 0
+  const percent =
+    progress && pages.length
+      ? Math.min(100, Math.round(((lastPage + 1) / pages.length) * 100))
+      : 0
+  const highlights = db
+    .prepare('SELECT * FROM highlights WHERE user_id = ? AND book_id = ? ORDER BY page, start_offset')
+    .all(user.id, params.bookId)
+  return {
+    book: { id: book.id, title: book.title, author: book.author, image: book.image },
+    page: progress && pages.length ? lastPage + 1 : 0,
+    total: pages.length,
+    percent: pages.length ? percent : 0,
+    hasContent: pages.length > 0,
+    highlights: highlights.map(highlightDto),
   }
 })
 
@@ -1109,34 +1284,29 @@ route('POST', 'reading/:bookId/activity', READERS, ({ params, body, user }) => {
   if (body.type && body.type !== expectedType) {
     throw httpError(400, 'El tipo de actividad no corresponde al bloque.')
   }
+  const existing = db
+    .prepare('SELECT 1 FROM activity_results WHERE user_id = ? AND book_id = ? AND page = ?')
+    .get(user.id, book.id, blockIndex)
+  if (existing) throw httpError(409, 'Ya respondiste esta actividad.')
 
   let answer
   let isCorrect = null
-  let score = 0
   if (expectedType === 'trivia') {
     answer = String(body.answer || '').trim()
     const option = trivia.options.find((item) => item.id === answer)
     if (!option) throw httpError(400, 'Selecciona una opción válida.')
     isCorrect = answer === trivia.correctOption
-    score = isCorrect ? 100 : 0
   } else {
     answer = String(body.answer || '').trim()
     if (!answer) throw httpError(400, 'La reflexión no puede estar vacía.')
     if (answer.length > 2000) throw httpError(400, 'La reflexión no puede superar 2000 caracteres.')
-    score = 50
   }
 
   const now = nowISO()
   db.prepare(
     `INSERT INTO activity_results
        (user_id, book_id, page, activity_type, answer, is_correct, score, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-     ON CONFLICT(user_id, book_id, page) DO UPDATE SET
-       activity_type = excluded.activity_type,
-       answer = excluded.answer,
-       is_correct = excluded.is_correct,
-       score = excluded.score,
-       updated_at = excluded.updated_at`
+     VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?)`
   ).run(
     user.id,
     book.id,
@@ -1144,7 +1314,6 @@ route('POST', 'reading/:bookId/activity', READERS, ({ params, body, user }) => {
     expectedType,
     answer,
     isCorrect === null ? null : isCorrect ? 1 : 0,
-    score,
     now,
     now
   )
@@ -1283,7 +1452,8 @@ route('GET', 'history', null, ({ user }) => {
     ? db
         .prepare(
           `SELECT a.*, b.title, b.author, b.image, b.pages_json,
-                  u.nombre AS user_nombre, u.correo AS user_correo, u.rol AS user_rol
+                  u.nombre AS user_nombre, u.correo AS user_correo, u.rol AS user_rol,
+                  u.tipo_lector AS user_tipo
              FROM activity_results a
              JOIN books b ON b.id = a.book_id
              JOIN users u ON u.id = a.user_id
@@ -1293,7 +1463,8 @@ route('GET', 'history', null, ({ user }) => {
     : db
         .prepare(
           `SELECT a.*, b.title, b.author, b.image, b.pages_json,
-                  u.nombre AS user_nombre, u.correo AS user_correo, u.rol AS user_rol
+                  u.nombre AS user_nombre, u.correo AS user_correo, u.rol AS user_rol,
+                  u.tipo_lector AS user_tipo
              FROM activity_results a
              JOIN books b ON b.id = a.book_id
              JOIN users u ON u.id = a.user_id
@@ -1325,6 +1496,7 @@ route('GET', 'history', null, ({ user }) => {
         nombre: row.user_nombre,
         correo: row.user_correo,
         rol: row.user_rol,
+        tipoLector: row.user_tipo || null,
       },
     })),
   }
@@ -1400,7 +1572,6 @@ route('GET', 'reports/activities.csv', STAFF, ({ query }) => {
     'Libro',
     'Actividades respondidas',
     'Aciertos trivia',
-    'Puntaje total',
   ]
   const lines = [header.map(csvEscape).join(',')]
   for (const row of rows) {
@@ -1412,7 +1583,6 @@ route('GET', 'reports/activities.csv', STAFF, ({ query }) => {
         row.book.title,
         row.answered,
         row.correct,
-        row.score,
       ]
         .map(csvEscape)
         .join(',')
@@ -1430,9 +1600,9 @@ route('GET', 'reports/activities.csv', STAFF, ({ query }) => {
   }
 })
 
-/* --- Usuarios (solo administrador) --------------------------------- */
+/* --- Usuarios (solo bibliotecario) --------------------------------- */
 
-route('GET', 'users', ['Administrador'], () => {
+route('GET', 'users', STAFF, () => {
   const users = db.prepare('SELECT * FROM users ORDER BY id').all()
   const loans = db.prepare('SELECT * FROM loans').all()
   const counts = new Map()
@@ -1449,12 +1619,14 @@ route('GET', 'users', ['Administrador'], () => {
   }
 })
 
-route('POST', 'users', ['Administrador'], ({ body }) => {
+route('POST', 'users', STAFF, ({ body }) => {
   const nombre = cleanText(body.nombre, 120, 'nombre')
   const correo = String(body.correo || '').trim().toLowerCase()
   if (!isEmail(correo)) throw httpError(400, 'El correo no es válido.')
-  const rol = String(body.rol || 'Estudiante')
-  if (!ROLES.includes(rol)) throw httpError(400, 'Rol inválido.')
+  const tipoLector = String(body.tipoLector || 'estudiante')
+  if (!['estudiante', 'docente'].includes(tipoLector)) {
+    throw httpError(400, 'Tipo de lector inválido.')
+  }
   const password = String(body.password || '')
   if (password.length < 6) throw httpError(400, 'La contraseña debe tener al menos 6 caracteres.')
   if (db.prepare('SELECT 1 FROM users WHERE correo = ?').get(correo)) {
@@ -1462,27 +1634,22 @@ route('POST', 'users', ['Administrador'], ({ body }) => {
   }
   const info = db
     .prepare(
-      'INSERT INTO users (nombre, correo, rol, password_hash, created_at) VALUES (?, ?, ?, ?, ?)'
+      `INSERT INTO users (nombre, correo, rol, tipo_lector, active, password_hash, created_at)
+       VALUES (?, ?, 'Lector', ?, 1, ?, ?)`
     )
-    .run(nombre, correo, rol, hashPassword(password), nowISO())
+    .run(nombre, correo, tipoLector, hashPassword(password), nowISO())
   const created = db.prepare('SELECT * FROM users WHERE id = ?').get(info.lastInsertRowid)
   return { user: publicUser(created) }
 }, { status: 201 })
 
-route('PATCH', 'users/:id/role', ['Administrador'], ({ params, body, user }) => {
+route('PATCH', 'users/:id/active', STAFF, ({ params, body, user }) => {
   const id = Number(params.id)
   const target = db.prepare('SELECT * FROM users WHERE id = ?').get(id)
   if (!target) throw httpError(404, 'El usuario no existe.')
-  const rol = String(body.rol || '')
-  if (!ROLES.includes(rol)) throw httpError(400, 'Rol inválido.')
-  if (target.id === user.id) throw httpError(409, 'No puedes cambiar tu propio rol.')
-  if (target.rol === 'Administrador' && rol !== 'Administrador') {
-    const { total } = db
-      .prepare("SELECT COUNT(*) AS total FROM users WHERE rol = 'Administrador'")
-      .get()
-    if (total <= 1) throw httpError(409, 'Debe existir al menos un administrador.')
-  }
-  db.prepare('UPDATE users SET rol = ? WHERE id = ?').run(rol, id)
+  if (target.id === user.id) throw httpError(409, 'No puedes desactivar tu propia cuenta.')
+  const active = body.active ? 1 : 0
+  db.prepare('UPDATE users SET active = ? WHERE id = ?').run(active, id)
+  if (!active) db.prepare('DELETE FROM sessions WHERE user_id = ?').run(id)
   const updated = db.prepare('SELECT * FROM users WHERE id = ?').get(id)
   return { user: publicUser(updated) }
 })
@@ -1490,8 +1657,8 @@ route('PATCH', 'users/:id/role', ['Administrador'], ({ params, body, user }) => 
 /* --- Chat interno --------------------------------------------------- */
 
 route('GET', 'chat/messages', READERS, ({ user }) => {
-  const admins = adminIds()
-  if (admins.length === 0) throw httpError(409, 'No hay un administrador disponible para atender el chat.')
+  const admins = staffIds()
+  if (admins.length === 0) throw httpError(409, 'No hay un bibliotecario disponible para atender el chat.')
   const list = placeholders(admins.length)
   const rows = db
     .prepare(
@@ -1515,8 +1682,8 @@ route('GET', 'chat/messages', READERS, ({ user }) => {
 })
 
 route('POST', 'chat/messages', READERS, ({ body, user }) => {
-  const admins = adminIds()
-  if (admins.length === 0) throw httpError(409, 'No hay un administrador disponible para atender el chat.')
+  const admins = staffIds()
+  if (admins.length === 0) throw httpError(409, 'No hay un bibliotecario disponible para atender el chat.')
   const text = cleanText(body.text, 500, 'mensaje')
   const info = db
     .prepare('INSERT INTO messages (from_user, to_user, body, created_at) VALUES (?, ?, ?, ?)')
@@ -1526,7 +1693,7 @@ route('POST', 'chat/messages', READERS, ({ body, user }) => {
 }, { status: 201 })
 
 route('GET', 'chat/unread', null, ({ user }) => {
-  const admins = adminIds()
+  const admins = staffIds()
   if (admins.length === 0) return { unread: 0 }
   const list = placeholders(admins.length)
   if (admins.includes(user.id)) {
@@ -1547,11 +1714,11 @@ route('GET', 'chat/unread', null, ({ user }) => {
   return { unread: row.total }
 })
 
-route('GET', 'chat/threads', ['Administrador'], ({ user }) => {
-  const admins = adminIds()
+route('GET', 'chat/threads', STAFF, ({ user }) => {
+  const admins = staffIds()
   const list = placeholders(admins.length)
   const users = db
-    .prepare("SELECT id, nombre, correo, rol FROM users WHERE rol <> 'Administrador' ORDER BY nombre")
+    .prepare("SELECT id, nombre, correo, rol FROM users WHERE rol <> 'Bibliotecario' ORDER BY nombre")
     .all()
   const threads = []
   for (const candidate of users) {
@@ -1582,11 +1749,11 @@ route('GET', 'chat/threads', ['Administrador'], ({ user }) => {
   return { threads }
 })
 
-route('GET', 'chat/threads/:userId', ['Administrador'], ({ params, user }) => {
+route('GET', 'chat/threads/:userId', STAFF, ({ params, user }) => {
   const target = db.prepare('SELECT * FROM users WHERE id = ?').get(Number(params.userId))
   if (!target) throw httpError(404, 'El usuario no existe.')
-  if (target.rol === 'Administrador') throw httpError(400, 'No se puede abrir un chat de administrador.')
-  const admins = adminIds()
+  if (target.rol === 'Bibliotecario') throw httpError(400, 'No se puede abrir un chat de bibliotecario.')
+  const admins = staffIds()
   const list = placeholders(admins.length)
   const rows = db
     .prepare(
@@ -1606,10 +1773,10 @@ route('GET', 'chat/threads/:userId', ['Administrador'], ({ params, user }) => {
   }
 })
 
-route('POST', 'chat/threads/:userId/messages', ['Administrador'], ({ params, body, user }) => {
+route('POST', 'chat/threads/:userId/messages', STAFF, ({ params, body, user }) => {
   const target = db.prepare('SELECT * FROM users WHERE id = ?').get(Number(params.userId))
   if (!target) throw httpError(404, 'El usuario no existe.')
-  if (target.rol === 'Administrador') throw httpError(400, 'No se puede enviar mensajes a otro administrador.')
+  if (target.rol === 'Bibliotecario') throw httpError(400, 'No se puede enviar mensajes a otro bibliotecario.')
   const text = cleanText(body.text, 500, 'mensaje')
   const info = db
     .prepare('INSERT INTO messages (from_user, to_user, body, created_at) VALUES (?, ?, ?, ?)')
@@ -1618,10 +1785,10 @@ route('POST', 'chat/threads/:userId/messages', ['Administrador'], ({ params, bod
   return { message: messageDto(created, user.id) }
 }, { status: 201 })
 
-route('POST', 'chat/threads/:userId/read', ['Administrador'], ({ params }) => {
+route('POST', 'chat/threads/:userId/read', STAFF, ({ params }) => {
   const target = db.prepare('SELECT id FROM users WHERE id = ?').get(Number(params.userId))
   if (!target) throw httpError(404, 'El usuario no existe.')
-  const admins = adminIds()
+  const admins = staffIds()
   const list = placeholders(admins.length)
   db.prepare(
     `UPDATE messages SET read_at = ?

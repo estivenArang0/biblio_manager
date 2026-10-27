@@ -33,7 +33,7 @@ function AccesoDenegado() {
           </h1>
           <p className="text-body-sm text-on-surface-variant max-w-sm mt-1">
             Tu rol no tiene permisos para entrar a esta sección. Si crees que es un error,
-            contacta al administrador del sistema.
+            contacta al bibliotecario.
           </p>
         </div>
         <div className="flex flex-col sm:flex-row gap-3 w-full mt-2">

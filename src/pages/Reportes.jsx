@@ -38,7 +38,7 @@ function Reportes() {
   const [data, setData] = useState({ rows: [], totals: { total: 0, activos: 0, vencidos: 0, devueltos: 0 } })
   const [activityData, setActivityData] = useState({
     rows: [],
-    totals: { answered: 0, correct: 0, score: 0 },
+    totals: { answered: 0, correct: 0 },
   })
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
@@ -163,10 +163,9 @@ function Reportes() {
           <Total label="Devueltos" value={data.totals.devueltos} tone="text-on-surface-variant" />
         </section>
       ) : (
-        <section className="grid grid-cols-3 gap-2 sm:gap-space-sm">
+        <section className="grid grid-cols-2 gap-2 sm:gap-space-sm max-w-md">
           <Total label="Actividades" value={activityData.totals.answered} tone="text-on-surface" />
           <Total label="Aciertos trivia" value={activityData.totals.correct} tone="text-green-700" />
-          <Total label="Puntaje total" value={activityData.totals.score} tone="text-secondary" />
         </section>
       )}
 
@@ -254,7 +253,10 @@ function Reportes() {
                         <span className="block font-semibold text-on-surface">{row.user.nombre}</span>
                         <span className="block text-[10px] text-on-surface-variant">{row.user.correo}</span>
                       </td>
-                      <td className="px-3 py-2 whitespace-nowrap">{row.user.rol}</td>
+                      <td className="px-3 py-2 whitespace-nowrap">
+                        {row.user.rol}
+                        {row.user.tipoLector ? ` · ${row.user.tipoLector}` : ''}
+                      </td>
                       <td className="px-3 py-2">
                         <span className="block text-on-surface">{row.book.title}</span>
                         <span className="block text-[10px] text-on-surface-variant">{row.book.author}</span>
@@ -289,14 +291,13 @@ function Reportes() {
                   <th className="px-3 py-2 font-semibold">Libro</th>
                   <th className="px-3 py-2 font-semibold">Actividades</th>
                   <th className="px-3 py-2 font-semibold">Aciertos trivia</th>
-                  <th className="px-3 py-2 font-semibold">Puntaje total</th>
                   <th className="px-3 py-2 font-semibold">Última</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-outline-variant/20">
                 {activityData.rows.length === 0 ? (
                   <tr>
-                    <td colSpan={7} className="px-3 py-10 text-center text-on-surface-variant">
+                    <td colSpan={6} className="px-3 py-10 text-center text-on-surface-variant">
                       No hay actividades que coincidan con los filtros.
                     </td>
                   </tr>
@@ -307,11 +308,13 @@ function Reportes() {
                         <span className="block font-semibold text-on-surface">{row.user.nombre}</span>
                         <span className="block text-[10px] text-on-surface-variant">{row.user.correo}</span>
                       </td>
-                      <td className="px-3 py-2 whitespace-nowrap">{row.user.rol}</td>
+                      <td className="px-3 py-2 whitespace-nowrap">
+                        {row.user.rol}
+                        {row.user.tipoLector ? ` · ${row.user.tipoLector}` : ''}
+                      </td>
                       <td className="px-3 py-2">{row.book.title}</td>
                       <td className="px-3 py-2 font-semibold">{row.answered}</td>
                       <td className="px-3 py-2">{row.correct}</td>
-                      <td className="px-3 py-2 font-semibold text-secondary">{row.score}</td>
                       <td className="px-3 py-2 whitespace-nowrap">{fecha(row.lastAt)}</td>
                     </tr>
                   ))

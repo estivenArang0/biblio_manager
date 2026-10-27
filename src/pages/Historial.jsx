@@ -243,13 +243,14 @@ function Historial() {
                     {global && activity.user && (
                       <p className="text-[10px] text-on-surface-variant">
                         {activity.user.nombre} · {activity.user.rol}
+                        {activity.user.tipoLector ? ` · ${activity.user.tipoLector}` : ''}
                       </p>
                     )}
                     <p className="text-[10px] text-on-surface-variant line-clamp-2 mt-0.5">
                       Respuesta: {activity.answer}
                     </p>
                     <p className="text-[10px] text-on-surface-variant">
-                      {fechaHora(activity.at)} · {activity.score} pts
+                      {fechaHora(activity.at)}
                     </p>
                   </div>
                   <span

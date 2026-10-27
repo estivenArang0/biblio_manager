@@ -31,7 +31,8 @@ function Header({ onMenu }) {
   }
 
   const nombre = user?.nombre || 'Usuario TdeA'
-  const rol = user?.rol || 'Estudiante'
+  const rol = user?.rol || 'Lector'
+  const rolLabel = user?.tipoLector ? `${rol} · ${user.tipoLector}` : rol
 
   return (
     <header className="fixed top-0 left-0 right-0 z-50 bg-surface/90 backdrop-blur-xl shadow-[0_1px_8px_rgba(0,0,0,0.04)]">
@@ -102,7 +103,7 @@ function Header({ onMenu }) {
                 {nombre}
               </span>
               <span className="font-label-sm text-[11px] text-on-surface-variant mt-1 leading-none">
-                {rol}
+                {rolLabel}
               </span>
             </div>
           </div>

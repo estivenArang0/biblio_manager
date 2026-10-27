@@ -7,7 +7,7 @@ import { api } from '../services/api'
 import { catalogFilters } from '../data/catalogBooks'
 import { normalizarTexto as normalizar } from '../utils/text'
 
-const STAFF = ['Bibliotecario', 'Administrador']
+const STAFF = ['Bibliotecario']
 const IMAGEN_POR_DEFECTO =
   'https://images.unsplash.com/photo-1544716278-ca5e3f4abd8c?auto=format&fit=crop&q=80&w=600'
 
@@ -181,6 +181,16 @@ function Catalogo() {
       setFeedback({ type: 'error', text: err.message || 'No se pudo enviar la solicitud.' })
     } finally {
       setRequestingId(null)
+    }
+  }
+
+  const handleFavorite = async (book) => {
+    try {
+      if (book.isFavorite) await api.removeFavorite(book.id)
+      else await api.addFavorite(book.id)
+      await cargarLibros()
+    } catch (err) {
+      setFeedback({ type: 'error', text: err.message || 'No se pudo actualizar favoritos.' })
     }
   }
 
@@ -437,6 +447,7 @@ function Catalogo() {
               onEdit={handleOpenEditModal}
               onContent={setContentBook}
               onRequest={handleRequest}
+              onFavorite={handleFavorite}
               requesting={requestingId === book.id}
               esStaff={esStaff}
             />

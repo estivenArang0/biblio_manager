@@ -58,6 +58,7 @@ function Perfil() {
           <p className="text-xs text-on-surface-variant truncate">{user?.correo}</p>
           <span className="inline-block mt-1 px-2 py-0.5 rounded-full bg-surface-container text-on-surface text-[10px] font-semibold">
             {user?.rol}
+            {user?.tipoLector ? ` · ${user.tipoLector}` : ''}
           </span>
         </div>
       </section>

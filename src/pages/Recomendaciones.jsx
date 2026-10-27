@@ -226,16 +226,23 @@ function Recomendaciones() {
                   </div>
                 </div>
                 <div className="pt-space-md mt-auto">
-                  {book.myLoan?.status === 'activo' || book.myLoan?.status === 'vencido' ? (
+                  {book.myLoan?.status === 'activo' ? (
+                    <Link
+                      to={`/lectura/${book.id}`}
+                      className="w-full min-h-[44px] rounded-lg bg-primary text-on-primary font-label-md flex items-center justify-center"
+                    >
+                      Leer
+                    </Link>
+                  ) : book.myLoan?.status === 'vencido' ? (
                     <Link
                       to="/mis-prestamos"
                       className="w-full min-h-[44px] rounded-lg bg-surface-container text-on-surface font-label-md flex items-center justify-center"
                     >
-                      Ir a mi estantería
+                      Ver mi avance
                     </Link>
                   ) : book.myLoan?.status === 'pendiente' ? (
                     <div className="w-full min-h-[44px] rounded-lg bg-surface-container text-on-surface-variant font-label-md flex items-center justify-center">
-                      Solicitud en revisión
+                      Solicitado
                     </div>
                   ) : (
                     <button

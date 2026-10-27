@@ -55,10 +55,10 @@ function Chat() {
           Canal institucional
         </span>
         <h1 className="font-headline-lg text-headline-lg text-on-surface tracking-tight font-serif">
-          Chat con administración
+          Chat con biblioteca
         </h1>
         <p className="font-body-md text-body-md text-on-surface-variant">
-          {admin ? `Atendido por ${admin.nombre} · ${admin.correo}` : 'Escribe al administrador de la biblioteca.'}
+          {admin ? `Atendido por ${admin.nombre} · ${admin.correo}` : 'Escribe al bibliotecario.'}
         </p>
       </header>
 
@@ -72,10 +72,10 @@ function Chat() {
       <div className="bg-surface-container-lowest rounded-xl border border-outline-variant/25 shadow-sm overflow-hidden">
         <div className="px-4 py-3 border-b border-outline-variant/20 flex items-center gap-2">
           <span className="w-8 h-8 rounded-full bg-secondary-container text-on-secondary-container flex items-center justify-center text-[11px] font-bold">
-            AD
+            BI
           </span>
           <div className="min-w-0">
-            <p className="text-xs font-semibold text-on-surface truncate">Administración de biblioteca</p>
+            <p className="text-xs font-semibold text-on-surface truncate">Biblioteca</p>
             <p className="text-[10px] text-on-surface-variant">Actualización cada 5 segundos</p>
           </div>
           <span className="ml-auto flex items-center gap-1 text-[10px] text-green-700 font-semibold">
@@ -88,8 +88,8 @@ function Chat() {
           messages={messages}
           onSend={enviar}
           sending={sending}
-          placeholder="Escribe al administrador (máx. 500 caracteres)…"
-          emptyText="Aún no has escrito. Cuéntale al administrador qué necesitas."
+          placeholder="Escribe al bibliotecario (máx. 500 caracteres)…"
+          emptyText="Aún no has escrito. Cuéntale al bibliotecario qué necesitas."
         />
       </div>
 

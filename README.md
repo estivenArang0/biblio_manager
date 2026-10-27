@@ -47,29 +47,30 @@ Contraseña por defecto del seed: **`123456`**. Se puede cambiar antes de crear 
 
 | Rol | Correo | Nombre |
 | --- | --- | --- |
-| Estudiante | `estudiante@tdea.edu.co` | Ana María Restrepo |
-| Estudiante | `mateo.gomez@tdea.edu.co` | Mateo Gómez Salazar |
-| Docente | `profesor.jaramillo@tdea.edu.co` | Carlos Jaramillo |
-| Docente | `patricia.restrepo@tdea.edu.co` | Patricia Restrepo Vélez |
+| Lector | `estudiante@tdea.edu.co` | Ana María Restrepo |
+| Lector | `mateo.gomez@tdea.edu.co` | Mateo Gómez Salazar |
+| Lector | `profesor.jaramillo@tdea.edu.co` | Carlos Jaramillo |
+| Lector | `patricia.restrepo@tdea.edu.co` | Patricia Restrepo Vélez |
 | Bibliotecario | `bibliotecario.central@tdea.edu.co` | Luisa Fernanda Gómez |
-| Administrador | `admin@tdea.edu.co` | Administrador TdeA |
+| Bibliotecario | `coordinacion.biblioteca@tdea.edu.co` | Coordinación de Biblioteca |
 
-> **Docente** conserva permisos de lectura iguales a **Estudiante** (el sistema lo mantiene porque los reportes piden préstamos por docentes). Los tres niveles de permisos distintos son: Estudiante/Docente, Bibliotecario y Administrador.
+> Solo existen dos roles: **Lector** y **Bibliotecario**. El *tipo de lector* (`estudiante` o `docente`) es informativo y sirve para filtrar reportes; no cambia permisos.
 
 ## Matriz de permisos
 
-| Sección | Estudiante / Docente | Bibliotecario | Administrador |
-| --- | --- | --- | --- |
-| Catálogo | Ver y solicitar | Ver, registrar y editar | Ver, registrar y editar |
-| Mis préstamos | Sí | No | No |
-| Préstamos y devoluciones | No | Aprobar, devolver y préstamo directo | Aprobar, devolver y préstamo directo |
-| Lectura interactiva | Solo con préstamo activo | No | No |
-| Recomendaciones | Sí | No | No |
-| Historial | Solo el propio | Global | Global |
-| Reportes + CSV | No | Sí | Sí |
-| Chat con administración | Sí | No | Atiende la bandeja |
-| Usuarios y roles | No | No | Sí |
-| Mi perfil / cambiar contraseña | Sí | Sí | Sí |
+| Sección | Lector | Bibliotecario |
+| --- | --- | --- |
+| Catálogo | Ver y solicitar | Ver, registrar y editar |
+| Mis préstamos | Sí | No |
+| Lectura de libros | Sí, con préstamo vigente (físico o digital) | No |
+| Favoritos / notas / comprensión | Sí | No |
+| Recomendaciones | Sí | No |
+| Historial | Solo el propio | Global |
+| Préstamos y devoluciones | No | Aprobar, devolver y préstamo directo |
+| Reportes + CSV | No | Sí |
+| Chat | Con la biblioteca | Atiende la bandeja |
+| Usuarios | No | Crear lectores, activar y desactivar |
+| Mi perfil / cambiar contraseña | Sí | Sí |
 
 Todas las rutas del API validan la sesión y el rol en el **servidor**. Si se escribe una URL prohibida en el navegador se muestra **Acceso denegado (403)**; el API responde igualmente `403`.
 
@@ -81,13 +82,13 @@ Todas las rutas del API validan la sesión y el rol en el **servidor**. Si se es
 
 ### Mis préstamos
 - Portada, título, autor, fecha de préstamo, fecha límite y días restantes.
-- **Leer** solo para préstamos digitales activos.
-- **Retirar en biblioteca** para ejemplares físicos.
-- Préstamos vencidos en rojo y sin acceso a lectura.
-- Solicitudes pendientes separadas.
+- Estados: **Solicitado**, **Para leer** y **Vencido**.
+- **Leer** aparece siempre que el préstamo esté vigente, sea físico o digital.
+- Si está vencido no se puede leer, pero **Ver mi avance** muestra la página, el porcentaje y los resaltados, sin abrir el texto ni permitir avanzar.
+- Las tarjetas muestran solo portada, título, autor, fecha/días, estado y botón.
 
 ### Préstamo directo en mostrador
-- Botón **Nuevo préstamo** en “Préstamos y devoluciones” (Bibliotecario/Administrador).
+- Botón **Nuevo préstamo** en el panel del bibliotecario.
 - Búsqueda de usuario por nombre o correo y de libro por título o ISBN.
 - Fecha límite editable (15 días por defecto).
 - El backend valida que queden ejemplares y que el usuario no tenga préstamos vencidos; descuenta el ejemplar y registra el préstamo en el historial.
@@ -118,7 +119,7 @@ GOOGLE_BOOKS_API_KEY=tu_clave_aqui
 - Hay dos libros de ejemplo con 3 bloques y trivia: **Don Quijote** y **Tratado de las Formas Tipográficas**.
 
 ### Lectura interactiva protegida
-- Listado previo de libros prestados digitales activos.
+- Listado previo de libros con préstamo vigente.
 - El catálogo no muestra etiquetas de "prestado" ni enlaces de lectura.
 - Cada página se pide a `GET /api/reading/:bookId/page/:index`, que exige préstamo activo y vigente. Si se devuelve o vence, el visor se cierra con aviso.
 - El texto no tiene URL pública: solo se entrega por el API autenticado.
@@ -135,16 +136,22 @@ GOOGLE_BOOKS_API_KEY=tu_clave_aqui
 - Cada usuario solo ve y modifica sus propios resaltados.
 
 ### Resultados de actividades
-- Cada respuesta de trivia o reflexión se guarda en `activity_results` con usuario, libro, bloque, tipo, respuesta, acierto (solo trivia), puntaje y fecha.
-- Se guarda el **último intento** por bloque; el puntaje total no se duplica al repetir.
+- Cada respuesta de trivia o reflexión se guarda en `activity_results` con usuario, libro, bloque, tipo, respuesta, acierto (solo trivia) y fecha.
+- Cada bloque se responde **una sola vez**; queda bloqueado y no se puede repetir.
 - Al reabrir el libro, los bloques respondidos muestran la insignia **Completado** y recuperan la respuesta.
 - **Historial → Actividades** muestra libro, bloque, tipo, resultado y fecha. Cada usuario ve lo suyo; staff ve el historial global.
-- **Reportes → Resultados de actividades** agrupa por usuario/libro con actividades respondidas, aciertos de trivia y puntaje total, filtro por fecha y CSV.
+- **Reportes → Resultados de actividades** agrupa por usuario/libro con actividades respondidas y aciertos de trivia, filtro por fecha y CSV.
+- El visor muestra **“Aciertos X de Y”** (sin puntos ni trofeo). Al final de cada libro aparece **Ver resumen de comprensión**.
+
+### Favoritos, notas y comprensión
+- **Favoritos:** corazón en las tarjetas del catálogo y sección propia; desde ahí también se puede leer un libro prestado.
+- **Mis notas:** lista de notas guardadas en los subrayados, con libro y bloque.
+- **Mi comprensión lectora:** por libro muestra bloques respondidos, aciertos en trivias, porcentaje y mensaje según el resultado (80 % o más: “Muy buena comprensión lectora”).
 
 ### Reportes
 - Pestañas: préstamos por estudiantes/docentes/todos y resultados de actividades.
 - Filtros por fecha y estado; totales de total, activos, vencidos y devueltos.
-- Exportación CSV desde el API (solo Bibliotecario/Administrador).
+- Exportación CSV desde el API (solo Bibliotecario).
 
 ### Sesión y perfil
 - Cada petición autenticada actualiza `last_seen_at`; si pasan más de 30 minutos, el API borra la sesión y responde `401` con `code: SESSION_IDLE`.
@@ -152,8 +159,8 @@ GOOGLE_BOOKS_API_KEY=tu_clave_aqui
 - **Mi perfil** permite cambiar la contraseña (actual + nueva de mínimo 8 caracteres, guardada con `scrypt`).
 
 ### Chat interno
-- Ventana usuario ↔ administrador con polling cada 5 segundos.
-- Bandeja de conversaciones con contador de no leídos para el administrador.
+- Ventana lector ↔ biblioteca con polling cada 5 segundos.
+- Bandeja de conversaciones con contador de no leídos para el bibliotecario.
 - Máximo 500 caracteres; el texto se guarda plano y React lo escapa al renderizar (sin HTML).
 - Un usuario no puede leer conversaciones ajenas.
 
@@ -185,7 +192,7 @@ scripts/dev.mjs Levanta API + Vite en un comando
 ## Pruebas
 
 ```bash
-npm test        # 18 pruebas de integración del backend
+npm test        # 20 pruebas de integración del backend
 npm run lint
 npm run build
 ```
@@ -198,5 +205,5 @@ La verificación de interfaz se hizo con Chrome headless sobre el flujo completo
 - El contenido de lectura es texto de dominio público / de ejemplo almacenado en la base; no hay PDF ni archivos servidos como estáticos.
 - El cierre por inactividad se controla en el servidor (30 min por defecto, configurable con `SESSION_IDLE_MINUTES`); el navegador mantiene un temporizador de respaldo. La sesión absoluta expira a las 12 h.
 - El chat es de texto plano, sin adjuntos ni websockets.
-- El administrador no entra a "Mis préstamos" ni a lectura porque esas vistas exigen un préstamo personal; sí puede revisar y gestionar todo lo demás.
-- No se implementó recuperación de contraseña por correo ni edición de datos del perfil; sí el cambio de contraseña autenticado. Los usuarios los crea el administrador.
+- El bibliotecario no entra a "Mis préstamos" ni a lectura porque esas vistas exigen un préstamo personal; sí puede revisar y gestionar todo lo demás.
+- No se implementó recuperación de contraseña por correo ni edición de datos del perfil; sí el cambio de contraseña autenticado. Los lectores los crea el bibliotecario.

@@ -11,12 +11,42 @@ import { addDays, ymd } from './util.js'
 export const DEMO_PASSWORD = process.env.DEMO_PASSWORD || '123456'
 
 export const seedUsers = [
-  { nombre: 'Ana María Restrepo', correo: 'estudiante@tdea.edu.co', rol: 'Estudiante' },
-  { nombre: 'Mateo Gómez Salazar', correo: 'mateo.gomez@tdea.edu.co', rol: 'Estudiante' },
-  { nombre: 'Carlos Jaramillo', correo: 'profesor.jaramillo@tdea.edu.co', rol: 'Docente' },
-  { nombre: 'Patricia Restrepo Vélez', correo: 'patricia.restrepo@tdea.edu.co', rol: 'Docente' },
-  { nombre: 'Luisa Fernanda Gómez', correo: 'bibliotecario.central@tdea.edu.co', rol: 'Bibliotecario' },
-  { nombre: 'Administrador TdeA', correo: 'admin@tdea.edu.co', rol: 'Administrador' },
+  {
+    nombre: 'Ana María Restrepo',
+    correo: 'estudiante@tdea.edu.co',
+    rol: 'Lector',
+    tipoLector: 'estudiante',
+  },
+  {
+    nombre: 'Mateo Gómez Salazar',
+    correo: 'mateo.gomez@tdea.edu.co',
+    rol: 'Lector',
+    tipoLector: 'estudiante',
+  },
+  {
+    nombre: 'Carlos Jaramillo',
+    correo: 'profesor.jaramillo@tdea.edu.co',
+    rol: 'Lector',
+    tipoLector: 'docente',
+  },
+  {
+    nombre: 'Patricia Restrepo Vélez',
+    correo: 'patricia.restrepo@tdea.edu.co',
+    rol: 'Lector',
+    tipoLector: 'docente',
+  },
+  {
+    nombre: 'Luisa Fernanda Gómez',
+    correo: 'bibliotecario.central@tdea.edu.co',
+    rol: 'Bibliotecario',
+    tipoLector: null,
+  },
+  {
+    nombre: 'Coordinación de Biblioteca',
+    correo: 'coordinacion.biblioteca@tdea.edu.co',
+    rol: 'Bibliotecario',
+    tipoLector: null,
+  },
 ]
 
 const bookMeta = {

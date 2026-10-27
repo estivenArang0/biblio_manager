@@ -131,6 +131,16 @@ export const api = {
   bookActivities: (bookId) => request(`/reading/${encodeURIComponent(bookId)}/activity`),
   submitActivity: (bookId, payload) =>
     request(`/reading/${encodeURIComponent(bookId)}/activity`, { method: 'POST', body: payload }),
+  readingProgress: (bookId) => request(`/reading/${encodeURIComponent(bookId)}/progress`),
+  saveReadingProgress: (bookId, page) =>
+    request(`/reading/${encodeURIComponent(bookId)}/progress`, { method: 'POST', body: { page } }),
+  comprehension: () => request('/reading/comprehension'),
+
+  favorites: () => request('/favorites'),
+  addFavorite: (bookId) => request(`/favorites/${encodeURIComponent(bookId)}`, { method: 'POST' }),
+  removeFavorite: (bookId) =>
+    request(`/favorites/${encodeURIComponent(bookId)}`, { method: 'DELETE' }),
+  notes: () => request('/notes'),
 
   highlights: (bookId) => request('/highlights', { params: { bookId } }),
   createHighlight: (highlight) => request('/highlights', { method: 'POST', body: highlight }),
@@ -167,7 +177,8 @@ export const api = {
 
   users: () => request('/users'),
   createUser: (user) => request('/users', { method: 'POST', body: user }),
-  changeRole: (id, rol) => request(`/users/${id}/role`, { method: 'PATCH', body: { rol } }),
+  setUserActive: (id, active) =>
+    request(`/users/${id}/active`, { method: 'PATCH', body: { active } }),
 
   chatMessages: () => request('/chat/messages'),
   sendChat: (text) => request('/chat/messages', { method: 'POST', body: { text } }),

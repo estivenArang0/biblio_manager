@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { Link } from 'react-router-dom'
 
-function BookCard({ book, onEdit, onContent, onRequest, requesting, esStaff }) {
+function BookCard({ book, onEdit, onContent, onRequest, onFavorite, requesting, esStaff }) {
   const [showDetail, setShowDetail] = useState(false)
 
   const prestamo = book.myLoan
@@ -34,6 +34,22 @@ function BookCard({ book, onEdit, onContent, onRequest, requesting, esStaff }) {
               type="button"
             >
               <span className="material-symbols-outlined text-base">edit</span>
+            </button>
+          )}
+          {!esStaff && onFavorite && (
+            <button
+              onClick={() => onFavorite(book)}
+              title={book.isFavorite ? 'Quitar de favoritos' : 'Añadir a favoritos'}
+              aria-label={book.isFavorite ? 'Quitar de favoritos' : 'Añadir a favoritos'}
+              className="absolute top-space-sm right-space-sm w-11 h-11 rounded-full bg-surface-container-lowest/95 backdrop-blur text-secondary shadow-md flex items-center justify-center transition-transform active:scale-95 cursor-pointer z-10"
+              type="button"
+            >
+              <span
+                className="material-symbols-outlined text-base"
+                style={{ fontVariationSettings: book.isFavorite ? "'FILL' 1" : "'FILL' 0" }}
+              >
+                favorite
+              </span>
             </button>
           )}
 
@@ -95,13 +111,21 @@ function BookCard({ book, onEdit, onContent, onRequest, requesting, esStaff }) {
             </div>
 
             {!esStaff &&
-              (tienePrestamoActivo ? (
+              (prestamo?.status === 'activo' ? (
+                <Link
+                  to={`/lectura/${book.id}`}
+                  className="w-full min-h-[44px] py-2 px-space-sm bg-primary hover:bg-primary/90 text-on-primary font-label-md text-label-md rounded-lg transition-colors flex items-center justify-center gap-1.5"
+                >
+                  <span className="material-symbols-outlined text-lg">menu_book</span>
+                  <span>Leer</span>
+                </Link>
+              ) : tienePrestamoActivo ? (
                 <Link
                   to="/mis-prestamos"
-                  className="w-full min-h-[44px] py-2 px-space-sm bg-surface-container hover:bg-surface-container-high text-on-surface font-label-md text-label-md rounded-lg transition-colors flex items-center justify-center gap-1.5"
+                  className="w-full min-h-[44px] py-2 px-space-sm bg-surface-container text-on-surface font-label-md text-label-md rounded-lg transition-colors flex items-center justify-center gap-1.5"
                 >
-                  <span className="material-symbols-outlined text-lg text-secondary">bookmark</span>
-                  <span>Ir a mi estantería</span>
+                  <span className="material-symbols-outlined text-lg text-secondary">event_busy</span>
+                  <span>Ver mi avance</span>
                 </Link>
               ) : solicitudPendiente ? (
                 <button
@@ -110,7 +134,7 @@ function BookCard({ book, onEdit, onContent, onRequest, requesting, esStaff }) {
                   type="button"
                 >
                   <span className="material-symbols-outlined text-lg">schedule</span>
-                  <span>Solicitud en revisión</span>
+                  <span>Solicitado</span>
                 </button>
               ) : (
                 <button
@@ -194,6 +218,28 @@ function BookCard({ book, onEdit, onContent, onRequest, requesting, esStaff }) {
                   <span className="material-symbols-outlined text-sm">edit</span>
                   <span>Editar obra</span>
                 </button>
+              )}
+              {!esStaff && onRequest && prestamo?.status !== 'activo' && !solicitudPendiente && (
+                <button
+                  onClick={() => {
+                    setShowDetail(false)
+                    onRequest(book)
+                  }}
+                  className="min-h-[44px] px-4 py-2 rounded-lg bg-secondary text-on-secondary font-label-md flex items-center gap-1.5 cursor-pointer"
+                  type="button"
+                >
+                  <span className="material-symbols-outlined text-sm">bookmark_add</span>
+                  <span>Solicitar</span>
+                </button>
+              )}
+              {!esStaff && prestamo?.status === 'activo' && (
+                <Link
+                  to={`/lectura/${book.id}`}
+                  className="min-h-[44px] px-4 py-2 rounded-lg bg-primary text-on-primary font-label-md flex items-center gap-1.5"
+                >
+                  <span className="material-symbols-outlined text-sm">menu_book</span>
+                  <span>Leer</span>
+                </Link>
               )}
             </div>
           </div>

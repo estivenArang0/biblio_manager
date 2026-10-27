@@ -129,7 +129,7 @@ before(async () => {
     mateo: 'mateo.gomez@tdea.edu.co',
     docente: 'profesor.jaramillo@tdea.edu.co',
     bibliotecario: 'bibliotecario.central@tdea.edu.co',
-    admin: 'admin@tdea.edu.co',
+    admin: 'coordinacion.biblioteca@tdea.edu.co',
   })) {
     const data = await login(correo)
     tokens[key] = data.token
@@ -167,12 +167,12 @@ test('autenticación: credenciales inválidas y acceso anónimo', async () => {
 
   const me = await request('/auth/me', { token: tokens.estudiante })
   assert.equal(me.status, 200)
-  assert.equal(me.body.user.rol, 'Estudiante')
+  assert.equal(me.body.user.rol, 'Lector')
 })
 
 test('permisos: cada rol solo accede a lo suyo', async () => {
   assert.equal((await request('/users', { token: tokens.estudiante })).status, 403)
-  assert.equal((await request('/users', { token: tokens.bibliotecario })).status, 403)
+  assert.equal((await request('/users', { token: tokens.bibliotecario })).status, 200)
   assert.equal((await request('/reports/loans', { token: tokens.estudiante })).status, 403)
   assert.equal((await request('/loans/pending', { token: tokens.estudiante })).status, 403)
   assert.equal((await request('/chat/threads', { token: tokens.estudiante })).status, 403)
@@ -216,13 +216,14 @@ test('catálogo: sin etiquetas de "prestado" y con préstamo propio resumido', a
   assert.equal(cienAnos.myLoan.status, 'activo')
 })
 
-test('lectura: 403 sin préstamo activo, físico o vencido', async () => {
+test('lectura: físico prestado sí se lee; devuelto o vencido no', async () => {
   const ok = await request('/reading/quijote/page/0', { token: tokens.estudiante })
   assert.equal(ok.status, 200)
   assert.equal(ok.body.paragraphs.length, 4)
 
   const fisico = await request('/reading/cien-anos/page/0', { token: tokens.estudiante })
-  assert.equal(fisico.status, 403)
+  assert.equal(fisico.status, 200)
+  assert.ok(fisico.body.paragraphs.length >= 1)
 
   const devuelto = await request('/reading/semiotica/page/0', { token: tokens.estudiante })
   assert.equal(devuelto.status, 403)
@@ -418,7 +419,11 @@ test('reportes: filtros, totales y exportación CSV', async () => {
   const estudiantes = await request('/reports/loans?scope=estudiantes', { token: tokens.bibliotecario })
   assert.equal(estudiantes.status, 200)
   assert.ok(estudiantes.body.rows.length > 0)
-  assert.ok(estudiantes.body.rows.every((row) => row.user.rol === 'Estudiante'))
+  assert.ok(
+    estudiantes.body.rows.every(
+      (row) => row.user.rol === 'Lector' && row.user.tipoLector === 'estudiante'
+    )
+  )
   assert.equal(
     estudiantes.body.totals.total,
     estudiantes.body.totals.activos + estudiantes.body.totals.vencidos + estudiantes.body.totals.devueltos
@@ -426,7 +431,11 @@ test('reportes: filtros, totales y exportación CSV', async () => {
 
   const docentes = await request('/reports/loans?scope=docentes', { token: tokens.bibliotecario })
   assert.ok(docentes.body.rows.length > 0)
-  assert.ok(docentes.body.rows.every((row) => row.user.rol === 'Docente'))
+  assert.ok(
+    docentes.body.rows.every(
+      (row) => row.user.rol === 'Lector' && row.user.tipoLector === 'docente'
+    )
+  )
 
   const activos = await request('/reports/loans?scope=todos&status=activo', { token: tokens.bibliotecario })
   assert.ok(activos.body.rows.every((row) => row.status === 'activo'))
@@ -447,7 +456,7 @@ test('reportes: filtros, totales y exportación CSV', async () => {
   assert.equal(csvEstudiante.status, 403)
 })
 
-test('libros: solo bibliotecario/administrador registran y editan', async () => {
+test('libros: solo el bibliotecario registra y edita', async () => {
   const creado = await request('/books', {
     method: 'POST',
     token: tokens.bibliotecario,
@@ -471,41 +480,61 @@ test('libros: solo bibliotecario/administrador registran y editan', async () => 
   assert.equal(editado.body.book.title, 'Libro de prueba editado')
 })
 
-test('usuarios: el administrador crea cuentas y cambia roles', async () => {
+test('usuarios: el bibliotecario crea lectores y activa/desactiva', async () => {
   const correo = `nuevo.${Date.now()}@tdea.edu.co`
   const creado = await request('/users', {
     method: 'POST',
     token: tokens.admin,
-    body: { nombre: 'Nuevo Usuario', correo, rol: 'Docente', password: 'abc123' },
+    body: {
+      nombre: 'Nuevo Lector',
+      correo,
+      tipoLector: 'docente',
+      password: 'abc123',
+    },
   })
   assert.equal(creado.status, 201)
+  assert.equal(creado.body.user.rol, 'Lector')
+  assert.equal(creado.body.user.tipoLector, 'docente')
 
   const loginNuevo = await request('/auth/login', {
     method: 'POST',
     body: { correo, password: 'abc123' },
   })
   assert.equal(loginNuevo.status, 200)
-  assert.equal(loginNuevo.body.user.rol, 'Docente')
+  assert.equal(loginNuevo.body.user.rol, 'Lector')
 
-  const cambio = await request(`/users/${creado.body.user.id}/role`, {
+  const desactivado = await request(`/users/${creado.body.user.id}/active`, {
     method: 'PATCH',
     token: tokens.admin,
-    body: { rol: 'Bibliotecario' },
+    body: { active: false },
   })
-  assert.equal(cambio.status, 200)
-  assert.equal(cambio.body.user.rol, 'Bibliotecario')
+  assert.equal(desactivado.status, 200)
+  assert.equal(desactivado.body.user.active, false)
 
-  const autoCambio = await request(`/users/${users.admin.id}/role`, {
+  const loginDesactivado = await request('/auth/login', {
+    method: 'POST',
+    body: { correo, password: 'abc123' },
+  })
+  assert.equal(loginDesactivado.status, 401)
+
+  const activado = await request(`/users/${creado.body.user.id}/active`, {
     method: 'PATCH',
     token: tokens.admin,
-    body: { rol: 'Estudiante' },
+    body: { active: true },
   })
-  assert.equal(autoCambio.status, 409)
+  assert.equal(activado.status, 200)
+
+  const autoDesactivado = await request(`/users/${users.admin.id}/active`, {
+    method: 'PATCH',
+    token: tokens.admin,
+    body: { active: false },
+  })
+  assert.equal(autoDesactivado.status, 409)
 
   const duplicado = await request('/users', {
     method: 'POST',
     token: tokens.admin,
-    body: { nombre: 'Duplicado', correo, rol: 'Estudiante', password: 'abc123' },
+    body: { nombre: 'Duplicado', correo, tipoLector: 'estudiante', password: 'abc123' },
   })
   assert.equal(duplicado.status, 409)
 })
@@ -739,16 +768,7 @@ test('contenido: el bibliotecario edita bloques y trivias; el lector los recibe'
   assert.equal(primera.body.trivia.correctOption, 'A')
 })
 
-test('actividades: guarda último intento, suma una sola vez y alimenta historial/reportes', async () => {
-  const incorrecta = await request('/reading/quijote/activity', {
-    method: 'POST',
-    token: tokens.estudiante,
-    body: { blockIndex: 0, type: 'trivia', answer: 'B' },
-  })
-  assert.equal(incorrecta.status, 201)
-  assert.equal(incorrecta.body.result.isCorrect, false)
-  assert.equal(incorrecta.body.totals.score, 0)
-
+test('actividades: un solo intento bloqueado y alimenta historial/reportes', async () => {
   const correcta = await request('/reading/quijote/activity', {
     method: 'POST',
     token: tokens.estudiante,
@@ -756,17 +776,17 @@ test('actividades: guarda último intento, suma una sola vez y alimenta historia
   })
   assert.equal(correcta.status, 201)
   assert.equal(correcta.body.result.isCorrect, true)
-  assert.equal(correcta.body.totals.score, 100)
   assert.equal(correcta.body.totals.answered, 1)
+  assert.equal(correcta.body.totals.correct, 1)
+  assert.equal(correcta.body.totals.totalTrivias, 1)
 
   const repetida = await request('/reading/quijote/activity', {
     method: 'POST',
     token: tokens.estudiante,
-    body: { blockIndex: 0, type: 'trivia', answer: 'A' },
+    body: { blockIndex: 0, type: 'trivia', answer: 'B' },
   })
-  assert.equal(repetida.status, 201)
-  assert.equal(repetida.body.totals.score, 100)
-  assert.equal(repetida.body.totals.answered, 1)
+  assert.equal(repetida.status, 409)
+  assert.match(repetida.body.error, /Ya respondiste/i)
 
   const reflexion = await request('/reading/quijote/activity', {
     method: 'POST',
@@ -781,7 +801,13 @@ test('actividades: guarda último intento, suma una sola vez y alimenta historia
   assert.equal(reflexion.body.result.activityType, 'reflection')
   assert.equal(reflexion.body.result.isCorrect, null)
   assert.equal(reflexion.body.totals.answered, 2)
-  assert.equal(reflexion.body.totals.score, 150)
+
+  const repetidaReflexion = await request('/reading/quijote/activity', {
+    method: 'POST',
+    token: tokens.estudiante,
+    body: { blockIndex: 2, type: 'reflection', answer: 'Otra respuesta.' },
+  })
+  assert.equal(repetidaReflexion.status, 409)
 
   const guardadas = await request('/reading/quijote/activity', { token: tokens.estudiante })
   assert.equal(guardadas.status, 200)
@@ -804,7 +830,6 @@ test('actividades: guarda último intento, suma una sola vez y alimenta historia
   assert.ok(fila)
   assert.equal(fila.answered, 2)
   assert.equal(fila.correct, 1)
-  assert.equal(fila.score, 150)
   assert.ok(reporte.body.totals.answered >= 2)
 
   const csv = await request('/reports/activities.csv', {
@@ -817,4 +842,75 @@ test('actividades: guarda último intento, suma una sola vez y alimenta historia
 
   const denegado = await request('/reports/activities', { token: tokens.estudiante })
   assert.equal(denegado.status, 403)
+})
+
+test('favoritos, notas, avance y resumen de comprensión', async () => {
+  const favorito = await request('/favorites/quijote', {
+    method: 'POST',
+    token: tokens.estudiante,
+  })
+  assert.equal(favorito.status, 200)
+  const favoritos = await request('/favorites', { token: tokens.estudiante })
+  assert.ok(favoritos.body.books.some((book) => book.id === 'quijote' && book.isFavorite))
+
+  const nota = await request('/highlights', {
+    method: 'POST',
+    token: tokens.estudiante,
+    body: {
+      bookId: 'quijote',
+      page: 0,
+      blockIndex: 0,
+      startOffset: 0,
+      endOffset: 10,
+      text: 'En esto, d',
+      color: 'azul',
+      note: 'Nota para el resumen',
+    },
+  })
+  assert.equal(nota.status, 201)
+  const notas = await request('/notes', { token: tokens.estudiante })
+  assert.ok(notas.body.notes.some((item) => item.id === nota.body.highlight.id))
+
+  const avance = await request('/reading/quijote/progress', {
+    method: 'POST',
+    token: tokens.estudiante,
+    body: { page: 1 },
+  })
+  assert.equal(avance.status, 200)
+  const detalleAvance = await request('/reading/quijote/progress', { token: tokens.estudiante })
+  assert.equal(detalleAvance.status, 200)
+  assert.equal(detalleAvance.body.page, 2)
+  assert.equal(detalleAvance.body.total, 3)
+  assert.equal(detalleAvance.body.percent, 67)
+  assert.ok(detalleAvance.body.highlights.some((item) => item.note === 'Nota para el resumen'))
+
+  const vencido = await request('/reading/aleph/progress', { token: tokens.estudiante })
+  assert.equal(vencido.status, 200)
+  assert.equal(vencido.body.page, 0)
+  assert.equal(vencido.body.percent, 0)
+  assert.ok(vencido.body.hasContent)
+
+  const comprension = await request('/reading/comprehension', { token: tokens.estudiante })
+  assert.equal(comprension.status, 200)
+  const fila = comprension.body.books.find((item) => item.book.id === 'quijote')
+  assert.ok(fila)
+  assert.equal(fila.answered, 2)
+  assert.equal(fila.correct, 1)
+  assert.equal(fila.totalTrivias, 1)
+  assert.equal(fila.percentage, 100)
+  assert.match(fila.message, /Muy buena/i)
+
+  const quitar = await request('/favorites/quijote', {
+    method: 'DELETE',
+    token: tokens.estudiante,
+  })
+  assert.equal(quitar.status, 200)
+})
+
+test('usuarios: solo existen roles Lector y Bibliotecario', async () => {
+  const listado = await request('/users', { token: tokens.bibliotecario })
+  assert.equal(listado.status, 200)
+  assert.ok(listado.body.users.every((user) => ['Lector', 'Bibliotecario'].includes(user.rol)))
+  assert.ok(listado.body.users.some((user) => user.tipoLector === 'docente'))
+  assert.ok(listado.body.users.every((user) => user.active === true))
 })

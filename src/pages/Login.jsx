@@ -4,28 +4,16 @@ import { useAuth } from '../context/authContext'
 
 const demoRoles = [
   {
-    rol: 'Estudiante',
+    rol: 'Lector',
     correo: 'estudiante@tdea.edu.co',
     icon: 'person',
     activo: 'bg-primary text-on-primary shadow-sm',
-  },
-  {
-    rol: 'Docente',
-    correo: 'profesor.jaramillo@tdea.edu.co',
-    icon: 'school',
-    activo: 'bg-secondary text-on-secondary shadow-sm',
   },
   {
     rol: 'Bibliotecario',
     correo: 'bibliotecario.central@tdea.edu.co',
     icon: 'shield_person',
     activo: 'bg-amber-600 text-white shadow-sm',
-  },
-  {
-    rol: 'Administrador',
-    correo: 'admin@tdea.edu.co',
-    icon: 'admin_panel_settings',
-    activo: 'bg-emerald-700 text-white shadow-sm',
   },
 ]
 
@@ -36,7 +24,7 @@ function Login() {
   const [showPassword, setShowPassword] = useState(false)
   const [correo, setCorreo] = useState('estudiante@tdea.edu.co')
   const [password, setPassword] = useState('')
-  const [rolSeleccionado, setRolSeleccionado] = useState('Estudiante')
+  const [rolSeleccionado, setRolSeleccionado] = useState('Lector')
   const [error, setError] = useState('')
   const [enviando, setEnviando] = useState(false)
 

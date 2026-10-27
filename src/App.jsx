@@ -14,10 +14,13 @@ import Chat from './pages/Chat'
 import AdminChat from './pages/AdminChat'
 import Usuarios from './pages/Usuarios'
 import Perfil from './pages/Perfil'
+import Favoritos from './pages/Favoritos'
+import MisNotas from './pages/MisNotas'
+import Comprension from './pages/Comprension'
 import NotFound from './pages/NotFound'
 
-const READERS = ['Estudiante', 'Docente']
-const STAFF = ['Bibliotecario', 'Administrador']
+const READERS = ['Lector']
+const STAFF = ['Bibliotecario']
 
 function App() {
   return (
@@ -72,6 +75,30 @@ function App() {
             </RequireRole>
           }
         />
+        <Route
+          path="/favoritos"
+          element={
+            <RequireRole roles={READERS}>
+              <Favoritos />
+            </RequireRole>
+          }
+        />
+        <Route
+          path="/mis-notas"
+          element={
+            <RequireRole roles={READERS}>
+              <MisNotas />
+            </RequireRole>
+          }
+        />
+        <Route
+          path="/comprension"
+          element={
+            <RequireRole roles={READERS}>
+              <Comprension />
+            </RequireRole>
+          }
+        />
         <Route path="/historial" element={<Historial />} />
         <Route path="/perfil" element={<Perfil />} />
         <Route
@@ -91,9 +118,9 @@ function App() {
           }
         />
         <Route
-          path="/admin/chat"
+          path="/chat-bandeja"
           element={
-            <RequireRole roles={['Administrador']}>
+            <RequireRole roles={STAFF}>
               <AdminChat />
             </RequireRole>
           }
@@ -101,7 +128,7 @@ function App() {
         <Route
           path="/usuarios"
           element={
-            <RequireRole roles={['Administrador']}>
+            <RequireRole roles={STAFF}>
               <Usuarios />
             </RequireRole>
           }

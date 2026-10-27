@@ -88,7 +88,7 @@ function AdminChat() {
             Atención al usuario
           </span>
           <h1 className="font-headline-lg text-headline-lg text-on-surface tracking-tight font-serif">
-            Chat · bandeja de administración
+            Chat · bandeja de biblioteca
           </h1>
         </div>
         <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-surface-container text-on-surface text-[11px] font-semibold self-start sm:self-auto">

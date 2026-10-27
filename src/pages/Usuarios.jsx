@@ -3,13 +3,10 @@ import LoadingScreen from '../components/LoadingScreen'
 import { useAuth } from '../context/authContext'
 import { api } from '../services/api'
 
-const ROLES = ['Estudiante', 'Docente', 'Bibliotecario', 'Administrador']
-const rolClase = {
-  Estudiante: 'bg-blue-50 text-blue-800 border-blue-200',
-  Docente: 'bg-purple-50 text-purple-800 border-purple-200',
-  Bibliotecario: 'bg-amber-50 text-amber-900 border-amber-200',
-  Administrador: 'bg-emerald-50 text-emerald-800 border-emerald-200',
-}
+const TIPOS = [
+  { value: 'estudiante', label: 'Estudiante' },
+  { value: 'docente', label: 'Docente' },
+]
 
 function fecha(value) {
   if (!value) return '—'
@@ -24,7 +21,12 @@ function Usuarios() {
   const [feedback, setFeedback] = useState(null)
   const [busy, setBusy] = useState(null)
   const [modalOpen, setModalOpen] = useState(false)
-  const [nuevo, setNuevo] = useState({ nombre: '', correo: '', rol: 'Estudiante', password: '' })
+  const [nuevo, setNuevo] = useState({
+    nombre: '',
+    correo: '',
+    tipoLector: 'estudiante',
+    password: '',
+  })
   const [saving, setSaving] = useState(false)
 
   const cargar = useCallback(async () => {
@@ -44,16 +46,20 @@ function Usuarios() {
     cargar()
   }, [cargar])
 
-  const cambiarRol = async (target, rol) => {
-    if (rol === target.rol) return
+  const cambiarActivo = async (target) => {
     setBusy(target.id)
     setFeedback(null)
     try {
-      await api.changeRole(target.id, rol)
+      await api.setUserActive(target.id, !target.active)
       await cargar()
-      setFeedback({ type: 'ok', text: `Rol de ${target.nombre} actualizado a ${rol}.` })
+      setFeedback({
+        type: 'ok',
+        text: target.active
+          ? `${target.nombre} fue desactivado.`
+          : `${target.nombre} fue activado.`,
+      })
     } catch (err) {
-      setFeedback({ type: 'error', text: err.message || 'No se pudo cambiar el rol.' })
+      setFeedback({ type: 'error', text: err.message || 'No se pudo actualizar el usuario.' })
     } finally {
       setBusy(null)
     }
@@ -67,10 +73,10 @@ function Usuarios() {
       await api.createUser(nuevo)
       await cargar()
       setModalOpen(false)
-      setNuevo({ nombre: '', correo: '', rol: 'Estudiante', password: '' })
-      setFeedback({ type: 'ok', text: 'Usuario creado correctamente.' })
+      setNuevo({ nombre: '', correo: '', tipoLector: 'estudiante', password: '' })
+      setFeedback({ type: 'ok', text: 'Lector creado correctamente.' })
     } catch (err) {
-      setFeedback({ type: 'error', text: err.message || 'No se pudo crear el usuario.' })
+      setFeedback({ type: 'error', text: err.message || 'No se pudo crear el lector.' })
     } finally {
       setSaving(false)
     }
@@ -83,13 +89,11 @@ function Usuarios() {
       <header className="flex flex-col md:flex-row md:items-end justify-between gap-space-md">
         <div className="flex flex-col gap-1">
           <span className="font-label-sm text-label-sm uppercase tracking-widest text-secondary font-medium">
-            Administración del sistema
+            Gestión de la biblioteca
           </span>
-          <h1 className="font-headline-lg text-headline-lg text-on-surface tracking-tight font-serif">
-            Usuarios y roles
-          </h1>
+          <h1 className="font-headline-lg text-headline-lg text-on-surface tracking-tight font-serif">Usuarios</h1>
           <p className="font-body-md text-body-md text-on-surface-variant max-w-2xl">
-            Crea cuentas y ajusta permisos. Los accesos se validan en el servidor en cada petición.
+            Crea lectores y activa o desactiva cuentas. El tipo de lector solo sirve para los reportes.
           </p>
         </div>
         <button
@@ -98,7 +102,7 @@ function Usuarios() {
           className="min-h-[44px] inline-flex items-center justify-center gap-2 px-4 rounded-lg bg-secondary text-on-secondary text-xs font-bold shadow-sm"
         >
           <span className="material-symbols-outlined text-base">person_add</span>
-          Nuevo usuario
+          Nuevo lector
         </button>
       </header>
 
@@ -133,21 +137,23 @@ function Usuarios() {
 
       <section className="bg-surface-container-lowest rounded-xl border border-outline-variant/25 overflow-hidden">
         <div className="overflow-x-auto">
-          <table className="w-full min-w-[720px] text-left text-xs">
+          <table className="w-full min-w-[780px] text-left text-xs">
             <thead className="bg-surface-container-low text-on-surface-variant">
               <tr>
                 <th className="px-3 py-2 font-semibold">Nombre</th>
                 <th className="px-3 py-2 font-semibold">Correo</th>
                 <th className="px-3 py-2 font-semibold">Rol</th>
+                <th className="px-3 py-2 font-semibold">Tipo</th>
                 <th className="px-3 py-2 font-semibold">Préstamos activos</th>
                 <th className="px-3 py-2 font-semibold">Alta</th>
+                <th className="px-3 py-2 font-semibold text-right">Estado</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-outline-variant/20">
               {users.map((item) => {
                 const esPropio = item.id === user?.id
                 return (
-                  <tr key={item.id} className="hover:bg-surface-container-low/60">
+                  <tr key={item.id} className={`hover:bg-surface-container-low/60 ${item.active ? '' : 'opacity-60'}`}>
                     <td className="px-3 py-2">
                       <span className="flex items-center gap-2">
                         <span className="w-7 h-7 rounded-full bg-surface-container text-on-surface flex items-center justify-center text-[10px] font-bold">
@@ -163,34 +169,31 @@ function Usuarios() {
                     </td>
                     <td className="px-3 py-2 text-on-surface-variant">{item.correo}</td>
                     <td className="px-3 py-2">
-                      <span
-                        className={`inline-block mb-1 px-2 py-0.5 rounded-full border text-[10px] font-semibold ${
-                          rolClase[item.rol] || rolClase.Estudiante
-                        }`}
-                      >
+                      <span className="inline-block px-2 py-0.5 rounded-full bg-surface-container text-on-surface text-[10px] font-semibold">
                         {item.rol}
                       </span>
-                      <select
-                        aria-label={`Cambiar rol de ${item.nombre}`}
-                        value={item.rol}
+                    </td>
+                    <td className="px-3 py-2 capitalize">{item.tipoLector || '—'}</td>
+                    <td className="px-3 py-2 font-mono">{item.activeLoans}</td>
+                    <td className="px-3 py-2 whitespace-nowrap">{fecha(item.createdAt)}</td>
+                    <td className="px-3 py-2 text-right">
+                      <button
+                        type="button"
+                        onClick={() => cambiarActivo(item)}
                         disabled={esPropio || busy === item.id}
-                        onChange={(event) => cambiarRol(item, event.target.value)}
-                        className="block min-h-[44px] px-2 rounded-lg bg-surface-container-low text-on-surface text-[11px] cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+                        className={`min-h-[44px] px-3 rounded-lg text-[11px] font-semibold disabled:opacity-40 ${
+                          item.active
+                            ? 'bg-surface-container hover:bg-error-container hover:text-on-error-container text-on-surface'
+                            : 'bg-green-50 text-green-800 border border-green-200'
+                        }`}
                       >
-                        {ROLES.map((rol) => (
-                          <option key={rol} value={rol}>
-                            {rol}
-                          </option>
-                        ))}
-                      </select>
+                        {busy === item.id
+                          ? 'Guardando…'
+                          : item.active
+                            ? 'Desactivar'
+                            : 'Activar'}
+                      </button>
                     </td>
-                    <td className="px-3 py-2">
-                      <span className="inline-flex items-center gap-1 font-mono text-on-surface">
-                        <span className="material-symbols-outlined text-sm text-secondary">library_books</span>
-                        {item.activeLoans}
-                      </span>
-                    </td>
-                    <td className="px-3 py-2 text-on-surface-variant whitespace-nowrap">{fecha(item.createdAt)}</td>
                   </tr>
                 )
               })}
@@ -202,8 +205,8 @@ function Usuarios() {
       <div className="rounded-xl bg-surface-container-low border border-outline-variant/25 p-3 text-[11px] text-on-surface-variant flex items-start gap-2">
         <span className="material-symbols-outlined text-secondary text-base">info</span>
         <p>
-          No puedes cambiar tu propio rol (para evitar bloqueos) y siempre debe quedar al menos un administrador.
-          Los permisos efectivos se aplican en el backend, aunque alguien escriba la URL directamente.
+          Los permisos se validan en el servidor. El tipo de lector (estudiante o docente) no cambia
+          accesos, solo filtra los reportes.
         </p>
       </div>
 
@@ -214,7 +217,7 @@ function Usuarios() {
             className="bg-surface-container-lowest rounded-xl border border-outline-variant/30 shadow-2xl w-full max-w-md p-5 flex flex-col gap-3"
           >
             <div className="flex items-center justify-between">
-              <h2 className="font-title-lg font-bold text-on-surface">Nuevo usuario</h2>
+              <h2 className="font-title-lg font-bold text-on-surface">Nuevo lector</h2>
               <button
                 type="button"
                 onClick={() => setModalOpen(false)}
@@ -250,18 +253,18 @@ function Usuarios() {
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div className="flex flex-col gap-1">
-                <label className="text-xs font-semibold text-on-surface" htmlFor="nuevo-rol">
-                  Rol
+                <label className="text-xs font-semibold text-on-surface" htmlFor="nuevo-tipo">
+                  Tipo de lector
                 </label>
                 <select
-                  id="nuevo-rol"
-                  value={nuevo.rol}
-                  onChange={(event) => setNuevo({ ...nuevo, rol: event.target.value })}
+                  id="nuevo-tipo"
+                  value={nuevo.tipoLector}
+                  onChange={(event) => setNuevo({ ...nuevo, tipoLector: event.target.value })}
                   className="min-h-[44px] px-3 rounded-lg bg-surface-container-low text-on-surface text-sm cursor-pointer"
                 >
-                  {ROLES.map((rol) => (
-                    <option key={rol} value={rol}>
-                      {rol}
+                  {TIPOS.map((tipo) => (
+                    <option key={tipo.value} value={tipo.value}>
+                      {tipo.label}
                     </option>
                   ))}
                 </select>
@@ -295,7 +298,7 @@ function Usuarios() {
                 disabled={saving}
                 className="min-h-[44px] px-4 rounded-lg bg-secondary text-on-secondary text-xs font-bold disabled:opacity-60"
               >
-                {saving ? 'Creando…' : 'Crear usuario'}
+                {saving ? 'Creando…' : 'Crear lector'}
               </button>
             </div>
           </form>

@@ -1,8 +1,8 @@
 /** Utilidades de fechas, texto y respuestas HTTP compartidas por el backend. */
 
-export const ROLES = ['Estudiante', 'Docente', 'Bibliotecario', 'Administrador']
-export const STAFF = ['Bibliotecario', 'Administrador']
-export const READERS = ['Estudiante', 'Docente']
+export const ROLES = ['Lector', 'Bibliotecario']
+export const STAFF = ['Bibliotecario']
+export const READERS = ['Lector']
 
 /** Fecha local en formato YYYY-MM-DD. */
 export function ymd(date = new Date()) {

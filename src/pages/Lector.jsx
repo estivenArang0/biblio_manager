@@ -42,17 +42,16 @@ function Lector() {
   const [selectedOption, setSelectedOption] = useState(null)
   const [showFeedback, setShowFeedback] = useState(false)
   const [isCorrect, setIsCorrect] = useState(false)
-  const [score, setScore] = useState(0)
   const [reflectionText, setReflectionText] = useState('')
   const [reflectionDone, setReflectionDone] = useState(false)
   const [activities, setActivities] = useState({})
-  const [activityTotals, setActivityTotals] = useState({ answered: 0, correct: 0, score: 0 })
+  const [activityTotals, setActivityTotals] = useState({ answered: 0, correct: 0, totalTrivias: 0 })
   const [savingActivity, setSavingActivity] = useState(false)
 
   const articleRef = useRef(null)
   const openedRef = useRef(false)
   const activitiesRef = useRef({})
-  const totalsRef = useRef({ answered: 0, correct: 0, score: 0 })
+  const totalsRef = useRef({ answered: 0, correct: 0, totalTrivias: 0 })
 
   const registrarCierre = useCallback(() => {
     if (!openedRef.current) return
@@ -72,7 +71,7 @@ function Lector() {
           api.highlights(bookId).catch(() => ({ highlights: [] })),
           api
             .bookActivities(bookId)
-            .catch(() => ({ activities: [], totals: { answered: 0, correct: 0, score: 0 } })),
+            .catch(() => ({ activities: [], totals: { answered: 0, correct: 0, totalTrivias: 0 } })),
         ])
         if (!alive) return
         setHighlights(guardados.highlights || [])
@@ -81,9 +80,8 @@ function Lector() {
         )
         setActivities(mapa)
         activitiesRef.current = mapa
-        setActivityTotals(actividades.totals || { answered: 0, correct: 0, score: 0 })
-        totalsRef.current = actividades.totals || { answered: 0, correct: 0, score: 0 }
-        setScore((actividades.totals || { score: 0 }).score)
+        setActivityTotals(actividades.totals || { answered: 0, correct: 0, totalTrivias: 0 })
+        totalsRef.current = actividades.totals || { answered: 0, correct: 0, totalTrivias: 0 }
         openedRef.current = true
         api.readingSession(bookId, 'open').catch(() => {})
       } catch (err) {
@@ -102,7 +100,7 @@ function Lector() {
   // Cada página se valida contra el backend: si el préstamo venció o fue
   // devuelto, el propio servidor responde 403 y cerramos la lectura.
   useEffect(() => {
-    if (!meta || blocked) return undefined
+    if (!meta || blocked || meta.total === 0) return undefined
     let alive = true
     api
       .readingPage(bookId, index)
@@ -115,7 +113,7 @@ function Lector() {
         setIsCorrect(Boolean(guardada?.isCorrect))
         setReflectionText(guardada?.activityType === 'reflection' ? guardada.answer : '')
         setReflectionDone(guardada?.activityType === 'reflection')
-        setScore(totalsRef.current.score || 0)
+        api.saveReadingProgress(bookId, index).catch(() => {})
         setSelection(null)
         setNoteMode(false)
         window.scrollTo({ top: 0, behavior: 'smooth' })
@@ -349,7 +347,6 @@ function Lector() {
       setActivities(siguiente)
       totalsRef.current = data.totals
       setActivityTotals(data.totals)
-      setScore(data.totals.score)
       return data.result
     } catch (err) {
       setToast(err.message || 'No se pudo guardar la actividad.')
@@ -432,6 +429,36 @@ function Lector() {
     )
   }
 
+  if (meta && meta.total === 0) {
+    return (
+      <div className="w-full min-h-[70vh] flex items-center justify-center px-4">
+        <div className="bg-surface-container-lowest max-w-lg w-full p-6 sm:p-8 rounded-2xl shadow-sm border border-outline-variant/30 text-center flex flex-col items-center gap-3">
+          <span className="material-symbols-outlined text-4xl text-secondary">menu_book</span>
+          <h1 className="font-headline-sm font-serif font-bold text-on-surface">
+            Este libro aún no tiene contenido digital
+          </h1>
+          <p className="text-sm text-on-surface-variant">
+            El préstamo está activo, pero la biblioteca todavía no cargó sus bloques de lectura.
+          </p>
+          <div className="flex flex-col sm:flex-row gap-2 w-full mt-2">
+            <Link
+              to="/lectura"
+              className="flex-1 min-h-[44px] inline-flex items-center justify-center rounded-lg bg-primary text-on-primary text-xs font-bold"
+            >
+              Volver a mis lecturas
+            </Link>
+            <Link
+              to="/comprension"
+              className="flex-1 min-h-[44px] inline-flex items-center justify-center rounded-lg bg-surface-container text-on-surface text-xs font-semibold"
+            >
+              Ver resumen
+            </Link>
+          </div>
+        </div>
+      </div>
+    )
+  }
+
   if (!meta || !page) return <LoadingScreen label="Cargando página…" />
 
   const modoActual = readingModes[mode]
@@ -467,8 +494,8 @@ function Lector() {
 
           <div className="flex flex-wrap items-center gap-2 justify-between lg:justify-end">
             <span className="flex items-center gap-1.5 px-2 py-1 rounded-lg bg-surface-container-low text-secondary font-label-md text-[11px] font-semibold">
-              <span className="material-symbols-outlined text-base">emoji_events</span>
-              {score} pts · {activityTotals.answered} act.
+              <span className="material-symbols-outlined text-base">insights</span>
+              Aciertos {activityTotals.correct} de {activityTotals.totalTrivias}
             </span>
 
             <div className="flex items-center bg-surface-container-low rounded-lg p-0.5 border border-outline-variant/20">
@@ -615,6 +642,18 @@ function Lector() {
                   <span className="material-symbols-outlined text-base">arrow_forward</span>
                 </button>
               </footer>
+
+              {index === meta.total - 1 && (
+                <div className="relative z-0 mt-4 flex justify-center">
+                  <Link
+                    to="/comprension"
+                    className="min-h-[44px] inline-flex items-center justify-center gap-2 px-4 rounded-lg border border-outline-variant/40 text-on-surface text-xs font-semibold"
+                  >
+                    <span className="material-symbols-outlined text-base">insights</span>
+                    Ver resumen de comprensión
+                  </Link>
+                </div>
+              )}
             </article>
 
             <p className="text-[10px] text-on-surface-variant flex items-center gap-1.5 px-1">
@@ -660,6 +699,7 @@ function Lector() {
                         rows={3}
                         data-testid="reflexion"
                         value={reflectionText}
+                        disabled={reflectionDone}
                         onChange={(event) => setReflectionText(event.target.value)}
                         placeholder="Escribe tu reflexión…"
                         className="w-full px-3 py-2 rounded-lg bg-surface-container-lowest text-on-surface text-xs focus:outline-none resize-y"
@@ -667,15 +707,15 @@ function Lector() {
                       <button
                         type="button"
                         data-testid="guardar-reflexion"
-                        disabled={!reflectionText.trim() || savingActivity}
+                        disabled={!reflectionText.trim() || savingActivity || reflectionDone}
                         onClick={enviarReflexion}
                         className="min-h-[44px] w-full rounded-lg bg-secondary text-on-secondary text-xs font-bold disabled:opacity-50"
                       >
                         {savingActivity
                           ? 'Guardando…'
                           : reflectionDone
-                            ? 'Actualizar reflexión (sin sumar puntos)'
-                            : 'Guardar reflexión (+50 pts)'}
+                            ? 'Respuesta guardada'
+                            : 'Guardar reflexión'}
                       </button>
                       {page.trivia.explanation && (
                         <p className="text-[11px] text-on-surface-variant">{page.trivia.explanation}</p>
@@ -696,6 +736,7 @@ function Lector() {
                             <input
                               type="radio"
                               name={`trivia-${page.folio}`}
+                              disabled={Boolean(activities[index])}
                               checked={selectedOption === option.id}
                               onChange={() => {
                                 setSelectedOption(option.id)
@@ -715,11 +756,15 @@ function Lector() {
                         <button
                           type="button"
                           data-testid="validar-trivia"
-                          disabled={!selectedOption || savingActivity}
+                          disabled={!selectedOption || savingActivity || Boolean(activities[index])}
                           onClick={validarTrivia}
                           className="mt-1 min-h-[44px] w-full rounded-lg bg-secondary hover:bg-secondary/90 text-on-secondary text-xs font-bold transition-all disabled:opacity-50 disabled:cursor-not-allowed"
                         >
-                          {savingActivity ? 'Guardando…' : 'Validar respuesta'}
+                          {savingActivity
+                            ? 'Guardando…'
+                            : activities[index]
+                              ? 'Respuesta guardada'
+                              : 'Validar respuesta'}
                         </button>
                       </div>
 
@@ -736,7 +781,7 @@ function Lector() {
                               {isCorrect ? 'check_circle' : 'cancel'}
                             </span>
                             <span>
-                              {isCorrect ? '¡Correcto! (+100 pts)' : 'Respuesta errónea'}
+                              {isCorrect ? '¡Correcto!' : 'Respuesta errónea'}
                             </span>
                           </div>
                           <p className="text-[11px] opacity-90">{page.trivia.explanation}</p>
