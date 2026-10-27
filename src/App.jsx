@@ -17,6 +17,7 @@ import Perfil from './pages/Perfil'
 import Favoritos from './pages/Favoritos'
 import MisNotas from './pages/MisNotas'
 import Comprension from './pages/Comprension'
+import Panel from './pages/Panel'
 import NotFound from './pages/NotFound'
 
 const READERS = ['Lector']
@@ -35,6 +36,14 @@ function App() {
         }
       >
         <Route path="/catalogo" element={<Catalogo />} />
+        <Route
+          path="/panel"
+          element={
+            <RequireRole roles={STAFF}>
+              <Panel />
+            </RequireRole>
+          }
+        />
         <Route
           path="/mis-prestamos"
           element={

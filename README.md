@@ -1,6 +1,6 @@
 # Biblio Manager
 
-Portal bibliotecario del **Tecnológico de Antioquia I.U.** para consultar el acervo, solicitar préstamos, leer en línea, subrayar textos, responder trivias y reflexiones, recibir recomendaciones y comunicarse con la administración.
+Portal bibliotecario del **Tecnológico de Antioquia I.U.** para consultar el acervo, solicitar préstamos, leer en línea, subrayar textos, responder trivias y reflexiones, recibir recomendaciones y comunicarse con la biblioteca.
 
 Proyecto integrador (PPI) de la asignatura **Lógica de Programación**.
 
@@ -79,6 +79,8 @@ Todas las rutas del API validan la sesión y el rol en el **servidor**. Si se es
 ### Roles y menú
 - Menú lateral filtrado por rol (hamburguesa en móvil).
 - Guards de ruta (`RequireAuth`, `RequireRole`) y comprobación de rol en cada endpoint.
+- **Lector:** Catálogo, Mis préstamos, Favoritos y notas, Comprensión lectora, Recomendaciones y Mi perfil.
+- **Bibliotecario:** Panel, Catálogo, Préstamos, Reportes y Usuarios. El perfil se abre desde el usuario del encabezado.
 
 ### Mis préstamos
 - Portada, título, autor, fecha de préstamo, fecha límite y días restantes.
@@ -130,27 +132,32 @@ GOOGLE_BOOKS_API_KEY=tu_clave_aqui
 - Apertura y cierre se registran en el historial.
 
 ### Subrayar y anotar
-- Al seleccionar texto aparece una barra con amarillo, verde, azul y **Añadir nota**.
+- Al seleccionar texto aparece una barra con amarillo, verde, azul, **Añadir nota** y **Guardar en favoritos**.
 - Se guarda por usuario, libro, página, bloque y offsets de inicio/fin.
-- Clic en un resaltado abre el editor: cambiar color, editar/borrar nota o quitar el resaltado.
+- Clic en un resaltado abre el editor: cambiar color, editar/borrar nota, marcar/desmarcar favorito o quitar el resaltado.
 - Cada usuario solo ve y modifica sus propios resaltados.
 
 ### Resultados de actividades
 - Cada respuesta de trivia o reflexión se guarda en `activity_results` con usuario, libro, bloque, tipo, respuesta, acierto (solo trivia) y fecha.
 - Cada bloque se responde **una sola vez**; queda bloqueado y no se puede repetir.
 - Al reabrir el libro, los bloques respondidos muestran la insignia **Completado** y recuperan la respuesta.
-- **Historial → Actividades** muestra libro, bloque, tipo, resultado y fecha. Cada usuario ve lo suyo; staff ve el historial global.
-- **Reportes → Resultados de actividades** agrupa por usuario/libro con actividades respondidas y aciertos de trivia, filtro por fecha y CSV.
+- **Historial** (ruta `/historial`) muestra libro, bloque, tipo, resultado y fecha. Cada usuario ve lo suyo; staff ve el historial global.
+- **Reportes → Comprensión lectora** agrupa por usuario/libro con actividades respondidas, aciertos y porcentaje, filtro por fecha y CSV.
 - El visor muestra **“Aciertos X de Y”** (sin puntos ni trofeo). Al final de cada libro aparece **Ver resumen de comprensión**.
 
 ### Favoritos, notas y comprensión
-- **Favoritos:** corazón en las tarjetas del catálogo y sección propia; desde ahí también se puede leer un libro prestado.
-- **Mis notas:** lista de notas guardadas en los subrayados, con libro y bloque.
-- **Mi comprensión lectora:** por libro muestra bloques respondidos, aciertos en trivias, porcentaje y mensaje según el resultado (80 % o más: “Muy buena comprensión lectora”).
+- **Favoritos y notas:** lista los **fragmentos** guardados agrupados por libro, con texto, color, nota, bloque y fecha. Filtros por libro y “Solo favoritos”.
+- El enlace de ubicación abre el libro en esa página si el préstamo está vigente; si está vencido solo muestra el fragmento.
+- Se puede quitar el favorito, editar o borrar la nota. El corazón de libros favoritos sigue disponible en el catálogo.
+- **Comprensión lectora:** por libro muestra bloques respondidos, aciertos en trivias, porcentaje y mensaje: ≥80 % “Muy buena comprensión”; 50–79 % “Buena, repasa estos bloques” con la lista de fallados; <50 % “Conviene releer el libro”.
+
+### Panel del bibliotecario
+- Tarjetas de solicitudes pendientes (con botón aprobar), préstamos activos, vencidos, mensajes sin leer, libros más prestados y préstamos del mes.
+- Cada tarjeta enlaza a su lista o abre el chat.
 
 ### Reportes
-- Pestañas: préstamos por estudiantes/docentes/todos y resultados de actividades.
-- Filtros por fecha y estado; totales de total, activos, vencidos y devueltos.
+- Tres pestañas: **Préstamos** (filtro por tipo de lector), **Vencidos** y **Comprensión lectora**.
+- Filtros por fecha; totales arriba y exportación CSV.
 - Exportación CSV desde el API (solo Bibliotecario).
 
 ### Sesión y perfil
@@ -159,10 +166,14 @@ GOOGLE_BOOKS_API_KEY=tu_clave_aqui
 - **Mi perfil** permite cambiar la contraseña (actual + nueva de mínimo 8 caracteres, guardada con `scrypt`).
 
 ### Chat interno
-- Ventana lector ↔ biblioteca con polling cada 5 segundos.
-- Bandeja de conversaciones con contador de no leídos para el bibliotecario.
+- Botón flotante abajo a la derecha en todas las pantallas autenticadas, con contador de no leídos; polling cada 5 segundos.
+- El lector chatea con la biblioteca; el bibliotecario ve la lista de conversaciones.
 - Máximo 500 caracteres; el texto se guarda plano y React lo escapa al renderizar (sin HTML).
 - Un usuario no puede leer conversaciones ajenas.
+
+### Sesión y seguridad
+- Login con límite de **5 fallos** y bloqueo de **1 minuto** por IP/correo (`LOGIN_MAX_ATTEMPTS`, `LOGIN_BLOCK_SECONDS`).
+- Sesión con vencimiento por inactividad en el servidor; contraseñas con `scrypt`; consultas SQL parametrizadas; contenido con `Cache-Control: no-store`.
 
 ### Responsive
 - **360 px:** una columna, menú hamburguesa, tablas con scroll interno, botones táctiles de 44 px y sin scroll horizontal de página.
@@ -192,12 +203,12 @@ scripts/dev.mjs Levanta API + Vite en un comando
 ## Pruebas
 
 ```bash
-npm test        # 20 pruebas de integración del backend
+npm test        # 22 pruebas de integración del backend
 npm run lint
 npm run build
 ```
 
-La verificación de interfaz se hizo con Chrome headless sobre el flujo completo (3 roles, préstamo real, lectura, subrayado persistente, reporte, CSV, chat y 360/768/1024 px). Evidencias locales en `../tmp/biblio-evidence/` (fuera del repositorio).
+La verificación de interfaz se hizo con Chrome headless sobre el flujo completo (2 roles, préstamo real, lectura, fragmentos favoritos, reportes, chat flotante y 360/768/1024 px). Evidencias locales en `../tmp/biblio-evidence/` (fuera del repositorio).
 
 ## Decisiones y simplificaciones
 

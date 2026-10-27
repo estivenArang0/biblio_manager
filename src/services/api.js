@@ -141,6 +141,7 @@ export const api = {
   removeFavorite: (bookId) =>
     request(`/favorites/${encodeURIComponent(bookId)}`, { method: 'DELETE' }),
   notes: () => request('/notes'),
+  fragments: () => request('/fragments'),
 
   highlights: (bookId) => request('/highlights', { params: { bookId } }),
   createHighlight: (highlight) => request('/highlights', { method: 'POST', body: highlight }),
@@ -148,6 +149,7 @@ export const api = {
   deleteHighlight: (id) => request(`/highlights/${id}`, { method: 'DELETE' }),
 
   history: () => request('/history'),
+  panel: () => request('/panel'),
   report: (params) => request('/reports/loans', { params }),
   reportActivities: (params) => request('/reports/activities', { params }),
   downloadReportCsv: async (params) => {

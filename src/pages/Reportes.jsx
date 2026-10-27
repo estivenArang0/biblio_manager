@@ -1,17 +1,12 @@
 import { useCallback, useEffect, useState } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import LoadingScreen from '../components/LoadingScreen'
 import { api } from '../services/api'
 
 const SCOPE_TABS = [
-  { key: 'estudiantes', label: 'Por estudiantes' },
-  { key: 'docentes', label: 'Por docentes' },
-  { key: 'todos', label: 'Todos los usuarios' },
-]
-const ESTADOS = [
-  { value: '', label: 'Todos los estados' },
-  { value: 'activo', label: 'Activo' },
-  { value: 'vencido', label: 'Vencido' },
-  { value: 'devuelto', label: 'Devuelto' },
+  { key: 'estudiantes', label: 'Estudiantes' },
+  { key: 'docentes', label: 'Docentes' },
+  { key: 'todos', label: 'Todos' },
 ]
 const estadoClase = {
   activo: 'bg-green-100 text-green-800 border-green-200',
@@ -30,11 +25,14 @@ function fecha(value) {
 }
 
 function Reportes() {
-  const [tipo, setTipo] = useState('prestamos')
-  const [scope, setScope] = useState('estudiantes')
+  const [searchParams, setSearchParams] = useSearchParams()
+  const inicial = searchParams.get('tab')
+  const [tipo, setTipo] = useState(
+    ['prestamos', 'vencidos', 'comprension'].includes(inicial) ? inicial : 'prestamos'
+  )
+  const [scope, setScope] = useState('todos')
   const [from, setFrom] = useState('')
   const [to, setTo] = useState('')
-  const [status, setStatus] = useState('')
   const [data, setData] = useState({ rows: [], totals: { total: 0, activos: 0, vencidos: 0, devueltos: 0 } })
   const [activityData, setActivityData] = useState({
     rows: [],
@@ -44,16 +42,19 @@ function Reportes() {
   const [error, setError] = useState('')
   const [exporting, setExporting] = useState(false)
 
-  const params = { scope, from, to, status }
-
   const cargar = useCallback(async () => {
     try {
-      if (tipo === 'prestamos') {
-        const response = await api.report({ scope, from, to, status })
-        setData(response)
-      } else {
+      if (tipo === 'comprension') {
         const response = await api.reportActivities({ from, to })
         setActivityData(response)
+      } else {
+        const response = await api.report({
+          scope,
+          from,
+          to,
+          status: tipo === 'vencidos' ? 'vencido' : '',
+        })
+        setData(response)
       }
       setError('')
     } catch (err) {
@@ -61,18 +62,33 @@ function Reportes() {
     } finally {
       setLoading(false)
     }
-  }, [tipo, scope, from, to, status])
+  }, [tipo, scope, from, to])
 
   useEffect(() => {
     // oxlint-disable-next-line react/set-state-in-effect -- filtros disparan la consulta al API
     cargar()
   }, [cargar])
 
+  const cambiarTipo = (next) => {
+    setTipo(next)
+    const params = new URLSearchParams(searchParams)
+    params.set('tab', next)
+    setSearchParams(params, { replace: true })
+  }
+
   const exportar = async () => {
     setExporting(true)
     try {
-      if (tipo === 'prestamos') await api.downloadReportCsv(params)
-      else await api.downloadActivitiesCsv({ from, to })
+      if (tipo === 'comprension') {
+        await api.downloadActivitiesCsv({ from, to })
+      } else {
+        await api.downloadReportCsv({
+          scope,
+          from,
+          to,
+          status: tipo === 'vencidos' ? 'vencido' : '',
+        })
+      }
     } catch (err) {
       setError(err.message || 'No se pudo exportar el CSV.')
     } finally {
@@ -80,23 +96,26 @@ function Reportes() {
     }
   }
 
-  const vacio =
-    tipo === 'prestamos' ? data.rows.length === 0 && loading : activityData.rows.length === 0 && loading
-  if (vacio) return <LoadingScreen label="Calculando reporte…" />
+  if (loading && data.rows.length === 0 && activityData.rows.length === 0) {
+    return <LoadingScreen label="Calculando reporte…" />
+  }
+
+  const descripcion =
+    tipo === 'prestamos'
+      ? 'Préstamos por tipo de lector, con filtros de fecha.'
+      : tipo === 'vencidos'
+        ? 'Préstamos vencidos por tipo de lector.'
+        : 'Resultados de comprensión por lector y libro.'
 
   return (
     <div className="w-full px-3 sm:px-gutter py-space-lg flex flex-col gap-space-lg max-w-6xl mx-auto">
       <header className="flex flex-col md:flex-row md:items-end justify-between gap-space-md">
         <div className="flex flex-col gap-1">
           <span className="font-label-sm text-label-sm uppercase tracking-widest text-secondary font-medium">
-            Analítica de circulación
+            Analítica
           </span>
           <h1 className="font-headline-lg text-headline-lg text-on-surface tracking-tight font-serif">Reportes</h1>
-          <p className="font-body-md text-body-md text-on-surface-variant max-w-2xl">
-            {tipo === 'prestamos'
-              ? 'Préstamos por estudiantes, docentes y todos los usuarios registrados, con filtros de fecha y estado.'
-              : 'Resultados de trivias y reflexiones por usuario y libro, con filtro por fecha.'}
-          </p>
+          <p className="font-body-md text-body-md text-on-surface-variant max-w-2xl">{descripcion}</p>
         </div>
         <button
           type="button"
@@ -110,33 +129,26 @@ function Reportes() {
       </header>
 
       <div className="flex items-center gap-1 p-1 rounded-lg bg-surface-container-low w-full sm:w-fit overflow-x-auto">
-        <button
-          type="button"
-          data-testid="reporte-prestamos"
-          onClick={() => setTipo('prestamos')}
-          className={`min-h-[44px] px-3 rounded-md text-xs font-semibold whitespace-nowrap ${
-            tipo === 'prestamos'
-              ? 'bg-surface-container-lowest shadow-sm text-on-surface'
-              : 'text-on-surface-variant'
-          }`}
-        >
-          Préstamos
-        </button>
-        <button
-          type="button"
-          data-testid="reporte-actividades"
-          onClick={() => setTipo('actividades')}
-          className={`min-h-[44px] px-3 rounded-md text-xs font-semibold whitespace-nowrap ${
-            tipo === 'actividades'
-              ? 'bg-surface-container-lowest shadow-sm text-on-surface'
-              : 'text-on-surface-variant'
-          }`}
-        >
-          Resultados de actividades
-        </button>
+        {[
+          ['prestamos', 'Préstamos'],
+          ['vencidos', 'Vencidos'],
+          ['comprension', 'Comprensión lectora'],
+        ].map(([key, label]) => (
+          <button
+            key={key}
+            type="button"
+            data-testid={`reporte-${key}`}
+            onClick={() => cambiarTipo(key)}
+            className={`min-h-[44px] px-3 rounded-md text-xs font-semibold whitespace-nowrap ${
+              tipo === key ? 'bg-surface-container-lowest shadow-sm text-on-surface' : 'text-on-surface-variant'
+            }`}
+          >
+            {label}
+          </button>
+        ))}
       </div>
 
-      {tipo === 'prestamos' && (
+      {tipo !== 'comprension' && (
         <div className="flex items-center gap-1 p-1 rounded-lg bg-surface-container-low w-full sm:w-fit overflow-x-auto">
           {SCOPE_TABS.map((tab) => (
             <button
@@ -155,21 +167,21 @@ function Reportes() {
         </div>
       )}
 
-      {tipo === 'prestamos' ? (
+      {tipo === 'comprension' ? (
+        <section className="grid grid-cols-2 gap-2 sm:gap-space-sm max-w-md">
+          <Total label="Actividades" value={activityData.totals.answered} tone="text-on-surface" />
+          <Total label="Aciertos trivia" value={activityData.totals.correct} tone="text-green-700" />
+        </section>
+      ) : (
         <section className="grid grid-cols-2 sm:grid-cols-4 gap-2 sm:gap-space-sm">
           <Total label="Total" value={data.totals.total} tone="text-on-surface" />
           <Total label="Activos" value={data.totals.activos} tone="text-green-700" />
           <Total label="Vencidos" value={data.totals.vencidos} tone="text-red-700" />
           <Total label="Devueltos" value={data.totals.devueltos} tone="text-on-surface-variant" />
         </section>
-      ) : (
-        <section className="grid grid-cols-2 gap-2 sm:gap-space-sm max-w-md">
-          <Total label="Actividades" value={activityData.totals.answered} tone="text-on-surface" />
-          <Total label="Aciertos trivia" value={activityData.totals.correct} tone="text-green-700" />
-        </section>
       )}
 
-      <section className="bg-surface-container-lowest rounded-xl border border-outline-variant/25 p-3 sm:p-4 grid grid-cols-1 sm:grid-cols-3 gap-space-sm">
+      <section className="bg-surface-container-lowest rounded-xl border border-outline-variant/25 p-3 sm:p-4 grid grid-cols-1 sm:grid-cols-2 gap-space-sm">
         <div className="flex flex-col gap-1">
           <label className="text-[11px] font-semibold text-on-surface-variant" htmlFor="fecha-desde">
             Desde
@@ -196,25 +208,6 @@ function Reportes() {
             className="min-h-[44px] px-3 rounded-lg bg-surface-container-low text-on-surface text-xs focus:outline-none"
           />
         </div>
-        {tipo === 'prestamos' && (
-          <div className="flex flex-col gap-1">
-            <label className="text-[11px] font-semibold text-on-surface-variant" htmlFor="estado-filtro">
-              Estado
-            </label>
-            <select
-              id="estado-filtro"
-              value={status}
-              onChange={(event) => setStatus(event.target.value)}
-              className="min-h-[44px] px-3 rounded-lg bg-surface-container-low text-on-surface text-xs focus:outline-none cursor-pointer"
-            >
-              {ESTADOS.map((option) => (
-                <option key={option.value} value={option.value}>
-                  {option.label}
-                </option>
-              ))}
-            </select>
-          </div>
-        )}
       </section>
 
       {error && (
@@ -224,14 +217,54 @@ function Reportes() {
         </div>
       )}
 
-      {tipo === 'prestamos' ? (
+      {tipo === 'comprension' ? (
         <section className="bg-surface-container-lowest rounded-xl border border-outline-variant/25 overflow-hidden">
           <div className="overflow-x-auto">
-            <table className="w-full min-w-[860px] text-left text-xs">
+            <table className="w-full min-w-[760px] text-left text-xs" data-testid="tabla-comprension">
               <thead className="bg-surface-container-low text-on-surface-variant">
                 <tr>
-                  <th className="px-3 py-2 font-semibold">Usuario</th>
-                  <th className="px-3 py-2 font-semibold">Rol</th>
+                  <th className="px-3 py-2 font-semibold">Lector</th>
+                  <th className="px-3 py-2 font-semibold">Tipo</th>
+                  <th className="px-3 py-2 font-semibold">Libro</th>
+                  <th className="px-3 py-2 font-semibold">Actividades</th>
+                  <th className="px-3 py-2 font-semibold">Aciertos</th>
+                  <th className="px-3 py-2 font-semibold">Porcentaje</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-outline-variant/20">
+                {activityData.rows.length === 0 ? (
+                  <tr>
+                    <td colSpan={6} className="px-3 py-10 text-center text-on-surface-variant">
+                      No hay actividades que coincidan con los filtros.
+                    </td>
+                  </tr>
+                ) : (
+                  activityData.rows.map((row) => (
+                    <tr key={`${row.user.id}-${row.book.id}`} className="hover:bg-surface-container-low/60">
+                      <td className="px-3 py-2">
+                        <span className="block font-semibold text-on-surface">{row.user.nombre}</span>
+                        <span className="block text-[10px] text-on-surface-variant">{row.user.correo}</span>
+                      </td>
+                      <td className="px-3 py-2 capitalize">{row.user.tipoLector || '—'}</td>
+                      <td className="px-3 py-2">{row.book.title}</td>
+                      <td className="px-3 py-2 font-semibold">{row.answered}</td>
+                      <td className="px-3 py-2">{row.correct}</td>
+                      <td className="px-3 py-2 font-semibold text-secondary">{row.percentage}%</td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </div>
+        </section>
+      ) : (
+        <section className="bg-surface-container-lowest rounded-xl border border-outline-variant/25 overflow-hidden">
+          <div className="overflow-x-auto">
+            <table className="w-full min-w-[900px] text-left text-xs">
+              <thead className="bg-surface-container-low text-on-surface-variant">
+                <tr>
+                  <th className="px-3 py-2 font-semibold">Lector</th>
+                  <th className="px-3 py-2 font-semibold">Tipo</th>
                   <th className="px-3 py-2 font-semibold">Libro</th>
                   <th className="px-3 py-2 font-semibold">Préstamo</th>
                   <th className="px-3 py-2 font-semibold">Límite</th>
@@ -253,10 +286,7 @@ function Reportes() {
                         <span className="block font-semibold text-on-surface">{row.user.nombre}</span>
                         <span className="block text-[10px] text-on-surface-variant">{row.user.correo}</span>
                       </td>
-                      <td className="px-3 py-2 whitespace-nowrap">
-                        {row.user.rol}
-                        {row.user.tipoLector ? ` · ${row.user.tipoLector}` : ''}
-                      </td>
+                      <td className="px-3 py-2 capitalize">{row.user.tipoLector || '—'}</td>
                       <td className="px-3 py-2">
                         <span className="block text-on-surface">{row.book.title}</span>
                         <span className="block text-[10px] text-on-surface-variant">{row.book.author}</span>
@@ -280,52 +310,7 @@ function Reportes() {
             </table>
           </div>
         </section>
-      ) : (
-        <section className="bg-surface-container-lowest rounded-xl border border-outline-variant/25 overflow-hidden">
-          <div className="overflow-x-auto">
-            <table className="w-full min-w-[760px] text-left text-xs" data-testid="tabla-actividades">
-              <thead className="bg-surface-container-low text-on-surface-variant">
-                <tr>
-                  <th className="px-3 py-2 font-semibold">Usuario</th>
-                  <th className="px-3 py-2 font-semibold">Rol</th>
-                  <th className="px-3 py-2 font-semibold">Libro</th>
-                  <th className="px-3 py-2 font-semibold">Actividades</th>
-                  <th className="px-3 py-2 font-semibold">Aciertos trivia</th>
-                  <th className="px-3 py-2 font-semibold">Última</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-outline-variant/20">
-                {activityData.rows.length === 0 ? (
-                  <tr>
-                    <td colSpan={6} className="px-3 py-10 text-center text-on-surface-variant">
-                      No hay actividades que coincidan con los filtros.
-                    </td>
-                  </tr>
-                ) : (
-                  activityData.rows.map((row) => (
-                    <tr key={`${row.user.id}-${row.book.id}`} className="hover:bg-surface-container-low/60">
-                      <td className="px-3 py-2">
-                        <span className="block font-semibold text-on-surface">{row.user.nombre}</span>
-                        <span className="block text-[10px] text-on-surface-variant">{row.user.correo}</span>
-                      </td>
-                      <td className="px-3 py-2 whitespace-nowrap">
-                        {row.user.rol}
-                        {row.user.tipoLector ? ` · ${row.user.tipoLector}` : ''}
-                      </td>
-                      <td className="px-3 py-2">{row.book.title}</td>
-                      <td className="px-3 py-2 font-semibold">{row.answered}</td>
-                      <td className="px-3 py-2">{row.correct}</td>
-                      <td className="px-3 py-2 whitespace-nowrap">{fecha(row.lastAt)}</td>
-                    </tr>
-                  ))
-                )}
-              </tbody>
-            </table>
-          </div>
-        </section>
       )}
-
-      {loading && <p className="text-xs text-on-surface-variant">Actualizando…</p>}
     </div>
   )
 }

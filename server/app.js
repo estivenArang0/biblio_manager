@@ -22,6 +22,9 @@ const idleSeconds = Number(process.env.SESSION_IDLE_SECONDS || 0)
 const idleMinutes = Number(process.env.SESSION_IDLE_MINUTES || 30)
 const SESSION_IDLE_MS = idleSeconds > 0 ? idleSeconds * 1000 : idleMinutes * 60 * 1000
 const GOOGLE_BOOKS_API_KEY = String(process.env.GOOGLE_BOOKS_API_KEY || '').trim()
+const LOGIN_MAX_ATTEMPTS = Number(process.env.LOGIN_MAX_ATTEMPTS || 5)
+const LOGIN_BLOCK_MS = Number(process.env.LOGIN_BLOCK_SECONDS || 60) * 1000
+const loginAttempts = new Map()
 
 /* ------------------------------------------------------------------ *
  * Utilidades HTTP
@@ -385,6 +388,7 @@ function highlightDto(row) {
     text: row.text,
     color: row.color,
     note: row.note || '',
+    isFavorite: Number(row.is_favorite) === 1,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   }
@@ -546,7 +550,7 @@ function buildActivityReport({ from = '', to = '' } = {}) {
   const rows = db
     .prepare(
       `SELECT u.id AS user_id, u.nombre, u.correo, u.rol, u.tipo_lector,
-              b.id AS book_id, b.title,
+              b.id AS book_id, b.title, b.pages_json,
               COUNT(*) AS answered,
               COALESCE(SUM(CASE WHEN a.activity_type = 'trivia' AND a.is_correct = 1 THEN 1 ELSE 0 END), 0) AS correct,
               MAX(a.updated_at) AS last_at
@@ -558,19 +562,28 @@ function buildActivityReport({ from = '', to = '' } = {}) {
         ORDER BY correct DESC, u.nombre COLLATE NOCASE, b.title COLLATE NOCASE`
     )
     .all(...params)
-    .map((row) => ({
-      user: {
-        id: row.user_id,
-        nombre: row.nombre,
-        correo: row.correo,
-        rol: row.rol,
-        tipoLector: row.tipo_lector || null,
-      },
-      book: { id: row.book_id, title: row.title },
-      answered: Number(row.answered),
-      correct: Number(row.correct),
-      lastAt: row.last_at,
-    }))
+    .map((row) => {
+      const pages = parsePages({ pages_json: row.pages_json })
+      const totalTrivias = pages.filter(
+        (page) => page.trivia && page.trivia.type !== 'reflection' && page.trivia.options?.length
+      ).length
+      const correct = Number(row.correct)
+      return {
+        user: {
+          id: row.user_id,
+          nombre: row.nombre,
+          correo: row.correo,
+          rol: row.rol,
+          tipoLector: row.tipo_lector || null,
+        },
+        book: { id: row.book_id, title: row.title },
+        answered: Number(row.answered),
+        correct,
+        totalTrivias,
+        percentage: totalTrivias ? Math.round((correct / totalTrivias) * 100) : 0,
+        lastAt: row.last_at,
+      }
+    })
   return {
     rows,
     totals: {
@@ -621,17 +634,36 @@ route(
   'POST',
   'auth/login',
   null,
-  ({ body }) => {
+  ({ body, req }) => {
     const correo = String(body.correo || '').trim().toLowerCase()
     const password = String(body.password || '')
     if (!correo || !password) throw httpError(400, 'Correo y contraseña son obligatorios.')
+    const ip = String(req.headers['x-forwarded-for'] || req.socket.remoteAddress || 'local')
+      .split(',')[0]
+      .trim()
+    const key = `${ip}|${correo}`
+    let attempt = loginAttempts.get(key)
+    if (attempt?.blockedUntil && attempt.blockedUntil > Date.now()) {
+      throw httpError(429, 'Demasiados intentos. Espera 1 minuto antes de volver a intentar.')
+    }
+    if (attempt?.blockedUntil && attempt.blockedUntil <= Date.now()) {
+      loginAttempts.delete(key)
+      attempt = undefined
+    }
     const user = db.prepare('SELECT * FROM users WHERE correo = ?').get(correo)
     if (!user || !verifyPassword(password, user.password_hash)) {
+      const count = (attempt?.count || 0) + 1
+      if (count >= LOGIN_MAX_ATTEMPTS) {
+        loginAttempts.set(key, { count, blockedUntil: Date.now() + LOGIN_BLOCK_MS })
+        throw httpError(429, 'Demasiados intentos. Espera 1 minuto antes de volver a intentar.')
+      }
+      loginAttempts.set(key, { count })
       throw httpError(401, 'Credenciales inválidas. Verifica tu correo y contraseña.')
     }
     if (Number(user.active) === 0) {
       throw httpError(401, 'Tu cuenta está desactivada. Contacta a la biblioteca.')
     }
+    loginAttempts.delete(key)
     const token = createSession(user.id)
     return { token, user: publicUser(user) }
   },
@@ -913,6 +945,36 @@ route('GET', 'notes', READERS, ({ user }) => {
   }
 })
 
+route('GET', 'fragments', READERS, ({ user }) => {
+  const rows = db
+    .prepare(
+      `SELECT h.*, b.title, b.author, b.image, b.pages_json
+         FROM highlights h JOIN books b ON b.id = h.book_id
+        WHERE h.user_id = ?
+        ORDER BY b.title COLLATE NOCASE, h.page, h.start_offset`
+    )
+    .all(user.id)
+  return {
+    fragments: rows.map((row) => {
+      const pages = parsePages({ pages_json: row.pages_json })
+      const loan = db
+        .prepare('SELECT * FROM loans WHERE user_id = ? AND book_id = ? ORDER BY id DESC LIMIT 1')
+        .get(user.id, row.book_id)
+      const status = loan ? loanStatus(loan) : null
+      return {
+        ...highlightDto(row),
+        title: row.title,
+        author: row.author,
+        image: row.image,
+        block: row.page + 1,
+        chapter: pages[row.page]?.chapter || '',
+        canRead: status === 'activo',
+        loanStatus: status,
+      }
+    }),
+  }
+})
+
 /* --- Préstamos ----------------------------------------------------- */
 
 route('GET', 'loans/mine', READERS, ({ user }) => {
@@ -1139,7 +1201,9 @@ route('GET', 'reading/comprehension', READERS, ({ user }) => {
   const rows = books.map((book) => {
     const pages = parsePages(book)
     const activities = db
-      .prepare('SELECT activity_type, is_correct FROM activity_results WHERE user_id = ? AND book_id = ?')
+      .prepare(
+        'SELECT page, activity_type, is_correct FROM activity_results WHERE user_id = ? AND book_id = ?'
+      )
       .all(user.id, book.id)
     const totalTrivias = pages.filter(
       (page) => page.trivia && page.trivia.type !== 'reflection' && page.trivia.options?.length
@@ -1148,14 +1212,19 @@ route('GET', 'reading/comprehension', READERS, ({ user }) => {
       (activity) => activity.activity_type === 'trivia' && activity.is_correct === 1
     ).length
     const percentage = totalTrivias ? Math.round((correct / totalTrivias) * 100) : 0
+    const failedBlocks = activities
+      .filter((activity) => activity.activity_type === 'trivia' && activity.is_correct === 0)
+      .map((activity) => ({
+        page: activity.page,
+        block: activity.page + 1,
+        chapter: pages[activity.page]?.chapter || '',
+      }))
     const message =
       percentage >= 80
-        ? 'Muy buena comprensión lectora'
-        : percentage >= 60
-          ? 'Buena comprensión lectora'
-          : percentage >= 40
-            ? 'Comprensión en proceso'
-            : 'Necesitas reforzar la lectura'
+        ? 'Muy buena comprensión'
+        : percentage >= 50
+          ? 'Buena, repasa estos bloques'
+          : 'Conviene releer el libro'
     return {
       book: {
         id: book.id,
@@ -1170,6 +1239,7 @@ route('GET', 'reading/comprehension', READERS, ({ user }) => {
       correct,
       percentage,
       message,
+      failedBlocks,
     }
   })
   return { books: rows }
@@ -1375,10 +1445,23 @@ route('POST', 'highlights', READERS, ({ body, user }) => {
   const now = nowISO()
   const info = db
     .prepare(
-      `INSERT INTO highlights (user_id, book_id, page, block_index, start_offset, end_offset, text, color, note, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      `INSERT INTO highlights (user_id, book_id, page, block_index, start_offset, end_offset, text, color, note, is_favorite, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
     )
-    .run(user.id, bookId, page, blockIndex, startOffset, endOffset, text, color, note, now, now)
+    .run(
+      user.id,
+      bookId,
+      page,
+      blockIndex,
+      startOffset,
+      endOffset,
+      text,
+      color,
+      note,
+      body.isFavorite ? 1 : 0,
+      now,
+      now
+    )
   const created = db.prepare('SELECT * FROM highlights WHERE id = ?').get(info.lastInsertRowid)
   return { highlight: highlightDto(created) }
 }, { status: 201 })
@@ -1391,9 +1474,13 @@ route('PUT', 'highlights/:id', READERS, ({ params, body, user }) => {
   const color = body.color === undefined ? row.color : String(body.color)
   if (!HIGHLIGHT_COLORS.includes(color)) throw httpError(400, 'Color de resaltado inválido.')
   const note = body.note === undefined ? row.note || '' : String(body.note).slice(0, 500)
-  db.prepare('UPDATE highlights SET color = ?, note = ?, updated_at = ? WHERE id = ?').run(
+  const isFavorite = body.isFavorite === undefined ? row.is_favorite : body.isFavorite ? 1 : 0
+  db.prepare(
+    'UPDATE highlights SET color = ?, note = ?, is_favorite = ?, updated_at = ? WHERE id = ?'
+  ).run(
     color,
     note,
+    isFavorite,
     nowISO(),
     row.id
   )
@@ -1504,6 +1591,52 @@ route('GET', 'history', null, ({ user }) => {
 
 /* --- Reportes ------------------------------------------------------- */
 
+route('GET', 'panel', STAFF, () => {
+  const loans = db
+    .prepare(
+      `SELECT l.*, b.title FROM loans l JOIN books b ON b.id = l.book_id
+        WHERE l.loan_date IS NOT NULL`
+    )
+    .all()
+  const today = ymd()
+  const month = today.slice(0, 7)
+  let activos = 0
+  let vencidos = 0
+  let delMes = 0
+  const top = new Map()
+  for (const loan of loans) {
+    const status = loanStatus(loan, today)
+    if (status === 'activo') activos += 1
+    if (status === 'vencido') vencidos += 1
+    if (String(loan.loan_date).startsWith(month)) delMes += 1
+    const key = loan.book_id
+    const current = top.get(key) || { id: key, title: loan.title, count: 0 }
+    current.count += 1
+    top.set(key, current)
+  }
+  const staff = staffIds()
+  let unread = 0
+  if (staff.length) {
+    const list = placeholders(staff.length)
+    unread = db
+      .prepare(
+        `SELECT COUNT(*) AS total FROM messages
+          WHERE to_user IN (${list}) AND from_user NOT IN (${list}) AND read_at IS NULL`
+      )
+      .get(...staff, ...staff).total
+  }
+  return {
+    solicitudesPendientes: db
+      .prepare("SELECT COUNT(*) AS total FROM loans WHERE status = 'pendiente'")
+      .get().total,
+    prestamosActivos: activos,
+    vencidos,
+    mensajesSinLeer: unread,
+    librosMasPrestados: [...top.values()].sort((a, b) => b.count - a.count).slice(0, 5),
+    prestamosDelMes: delMes,
+  }
+})
+
 route('GET', 'reports/loans', STAFF, ({ query }) => {
   return buildReportRows({
     scope: query.scope || 'todos',
@@ -1572,6 +1705,7 @@ route('GET', 'reports/activities.csv', STAFF, ({ query }) => {
     'Libro',
     'Actividades respondidas',
     'Aciertos trivia',
+    'Porcentaje',
   ]
   const lines = [header.map(csvEscape).join(',')]
   for (const row of rows) {
@@ -1583,6 +1717,7 @@ route('GET', 'reports/activities.csv', STAFF, ({ query }) => {
         row.book.title,
         row.answered,
         row.correct,
+        row.percentage,
       ]
         .map(csvEscape)
         .join(',')

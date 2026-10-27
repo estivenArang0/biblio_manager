@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import { spawn } from 'node:child_process'
 import fs from 'node:fs'
 import http from 'node:http'
+import { DatabaseSync } from 'node:sqlite'
 import os from 'node:os'
 import path from 'node:path'
 import test, { after, before } from 'node:test'
@@ -119,6 +120,7 @@ before(async () => {
       DEMO_PASSWORD: password,
       GOOGLE_BOOKS_URL: 'http://127.0.0.1:4125/books/v1/volumes',
       GOOGLE_BOOKS_API_KEY: 'test-key',
+      LOGIN_BLOCK_SECONDS: '1',
     },
     stdio: 'ignore',
   })
@@ -168,6 +170,71 @@ test('autenticación: credenciales inválidas y acceso anónimo', async () => {
   const me = await request('/auth/me', { token: tokens.estudiante })
   assert.equal(me.status, 200)
   assert.equal(me.body.user.rol, 'Lector')
+})
+
+test('seguridad: contenido protegido, cabeceras, hash y límite de login', async () => {
+  const otroLector = await request('/reading/quijote/page/0', { token: tokens.mateo })
+  assert.equal(otroLector.status, 403)
+
+  const vencido = await request('/reading/aleph/page/0', { token: tokens.estudiante })
+  assert.equal(vencido.status, 403)
+
+  const solicitud = await request('/loans', {
+    method: 'POST',
+    token: tokens.mateo,
+    body: { bookId: 'aleph' },
+  })
+  assert.equal(solicitud.status, 201)
+  const soloSolicitado = await request('/reading/aleph/page/0', { token: tokens.mateo })
+  assert.equal(soloSolicitado.status, 403)
+
+  const sinSesion = await request('/reading/quijote/page/0')
+  assert.equal(sinSesion.status, 401)
+
+  const contenido = await request('/reading/quijote/page/0', {
+    token: tokens.estudiante,
+    raw: true,
+  })
+  assert.equal(contenido.status, 200)
+  assert.match(contenido.headers.get('cache-control') || '', /no-store/)
+  assert.equal(contenido.headers.get('access-control-allow-origin'), null)
+
+  const db = new DatabaseSync(dbFile)
+  const hash = db.prepare('SELECT password_hash FROM users WHERE correo = ?').get(
+    'estudiante@tdea.edu.co'
+  ).password_hash
+  db.close()
+  assert.ok(hash.includes(':'))
+  assert.notEqual(hash, '123456')
+
+  const inyeccion = await request('/auth/login', {
+    method: 'POST',
+    body: { correo: "' OR 1=1 --", password: 'x' },
+  })
+  assert.equal(inyeccion.status, 401)
+
+  const correo = `limite.${Date.now()}@tdea.edu.co`
+  const estados = []
+  for (let attempt = 0; attempt < 5; attempt += 1) {
+    const response = await request('/auth/login', {
+      method: 'POST',
+      body: { correo, password: 'incorrecta' },
+    })
+    estados.push(response.status)
+  }
+  assert.deepEqual(estados, [401, 401, 401, 401, 429])
+  const bloqueado = await request('/auth/login', {
+    method: 'POST',
+    body: { correo, password: 'incorrecta' },
+  })
+  assert.equal(bloqueado.status, 429)
+
+  await new Promise((resolve) => setTimeout(resolve, 1200))
+  const liberado = await request('/auth/login', {
+    method: 'POST',
+    body: { correo, password: 'incorrecta' },
+  })
+  assert.equal(liberado.status, 401)
 })
 
 test('permisos: cada rol solo accede a lo suyo', async () => {
@@ -865,11 +932,19 @@ test('favoritos, notas, avance y resumen de comprensión', async () => {
       text: 'En esto, d',
       color: 'azul',
       note: 'Nota para el resumen',
+      isFavorite: true,
     },
   })
   assert.equal(nota.status, 201)
+  assert.equal(nota.body.highlight.isFavorite, true)
   const notas = await request('/notes', { token: tokens.estudiante })
   assert.ok(notas.body.notes.some((item) => item.id === nota.body.highlight.id))
+  const fragmentos = await request('/fragments', { token: tokens.estudiante })
+  assert.ok(
+    fragmentos.body.fragments.some(
+      (item) => item.id === nota.body.highlight.id && item.isFavorite && item.canRead
+    )
+  )
 
   const avance = await request('/reading/quijote/progress', {
     method: 'POST',
@@ -905,6 +980,11 @@ test('favoritos, notas, avance y resumen de comprensión', async () => {
     token: tokens.estudiante,
   })
   assert.equal(quitar.status, 200)
+
+  const panel = await request('/panel', { token: tokens.bibliotecario })
+  assert.equal(panel.status, 200)
+  assert.ok(panel.body.prestamosActivos >= 1)
+  assert.ok(Array.isArray(panel.body.librosMasPrestados))
 })
 
 test('usuarios: solo existen roles Lector y Bibliotecario', async () => {
@@ -913,4 +993,70 @@ test('usuarios: solo existen roles Lector y Bibliotecario', async () => {
   assert.ok(listado.body.users.every((user) => ['Lector', 'Bibliotecario'].includes(user.rol)))
   assert.ok(listado.body.users.some((user) => user.tipoLector === 'docente'))
   assert.ok(listado.body.users.every((user) => user.active === true))
+})
+
+test('comprensión: umbral 50 % y lista de bloques fallados', async () => {
+  const libro = await request('/books', {
+    method: 'POST',
+    token: tokens.bibliotecario,
+    body: {
+      title: `Libro umbral ${Date.now()}`,
+      author: 'Pruebas',
+      format: 'Digital',
+      copiesTotal: 1,
+    },
+  })
+  assert.equal(libro.status, 201)
+  const id = libro.body.book.id
+
+  const contenido = await request(`/books/${id}/content`, {
+    method: 'PUT',
+    token: tokens.bibliotecario,
+    body: {
+      blocks: [
+        {
+          chapter: 'UNO',
+          text: 'Texto uno.',
+          question: 'Pregunta uno',
+          options: ['Correcta', 'Mala 1', 'Mala 2'],
+          correctOption: 'A',
+        },
+        {
+          chapter: 'DOS',
+          text: 'Texto dos.',
+          question: 'Pregunta dos',
+          options: ['Mala 1', 'Correcta', 'Mala 2'],
+          correctOption: 'B',
+        },
+      ],
+    },
+  })
+  assert.equal(contenido.status, 200)
+
+  const prestamo = await request('/loans/direct', {
+    method: 'POST',
+    token: tokens.bibliotecario,
+    body: { userId: users.mateo.id, bookId: id, dueDate: '2099-01-01' },
+  })
+  assert.equal(prestamo.status, 201)
+
+  const uno = await request(`/reading/${id}/activity`, {
+    method: 'POST',
+    token: tokens.mateo,
+    body: { blockIndex: 0, type: 'trivia', answer: 'A' },
+  })
+  assert.equal(uno.status, 201)
+  const dos = await request(`/reading/${id}/activity`, {
+    method: 'POST',
+    token: tokens.mateo,
+    body: { blockIndex: 1, type: 'trivia', answer: 'A' },
+  })
+  assert.equal(dos.status, 201)
+
+  const resumen = await request('/reading/comprehension', { token: tokens.mateo })
+  const fila = resumen.body.books.find((item) => item.book.id === id)
+  assert.ok(fila)
+  assert.equal(fila.percentage, 50)
+  assert.equal(fila.message, 'Buena, repasa estos bloques')
+  assert.deepEqual(fila.failedBlocks.map((block) => block.block), [2])
 })

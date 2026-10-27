@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Link, useNavigate, useParams } from 'react-router-dom'
+import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import LoadingScreen from '../components/LoadingScreen'
 import { api } from '../services/api'
 
@@ -18,10 +18,14 @@ const colores = [
 function Lector() {
   const { bookId } = useParams()
   const navigate = useNavigate()
+  const [searchParams] = useSearchParams()
 
   const [meta, setMeta] = useState(null)
   const [page, setPage] = useState(null)
-  const [index, setIndex] = useState(0)
+  const [index, setIndex] = useState(() => {
+    const page = Number(searchParams.get('page'))
+    return Number.isInteger(page) && page >= 0 ? page : 0
+  })
   const [highlights, setHighlights] = useState([])
   const [loading, setLoading] = useState(true)
   const [pageLoading, setPageLoading] = useState(true)
@@ -35,6 +39,7 @@ function Lector() {
   const [editing, setEditing] = useState(null)
   const [editColor, setEditColor] = useState('amarillo')
   const [editNote, setEditNote] = useState('')
+  const [editFavorite, setEditFavorite] = useState(false)
   const [saving, setSaving] = useState(false)
 
   const [fontIndex, setFontIndex] = useState(1)
@@ -67,6 +72,7 @@ function Lector() {
         const data = await api.readingBook(bookId)
         if (!alive) return
         setMeta(data)
+        if (data.total > 0) setIndex((current) => Math.min(current, data.total - 1))
         const [guardados, actividades] = await Promise.all([
           api.highlights(bookId).catch(() => ({ highlights: [] })),
           api
@@ -226,7 +232,7 @@ function Lector() {
     setNoteDraft('')
   }
 
-  const crearResaltado = async (color, note = '') => {
+  const crearResaltado = async (color, note = '', isFavorite = false) => {
     if (!selection) return
     setSaving(true)
     try {
@@ -239,6 +245,7 @@ function Lector() {
         text: selection.text,
         color,
         note,
+        isFavorite,
       })
       setHighlights((prev) => [...prev, data.highlight])
       setSelection(null)
@@ -257,13 +264,18 @@ function Lector() {
     setEditing(highlight)
     setEditColor(highlight.color)
     setEditNote(highlight.note || '')
+    setEditFavorite(Boolean(highlight.isFavorite))
   }
 
   const guardarEdicion = async () => {
     if (!editing) return
     setSaving(true)
     try {
-      const data = await api.updateHighlight(editing.id, { color: editColor, note: editNote })
+      const data = await api.updateHighlight(editing.id, {
+        color: editColor,
+        note: editNote,
+        isFavorite: editFavorite,
+      })
       setHighlights((prev) => prev.map((item) => (item.id === data.highlight.id ? data.highlight : item)))
       setEditing(null)
       setToast('Resaltado actualizado.')
@@ -793,8 +805,10 @@ function Lector() {
               )}
 
               {page.glossary?.length > 0 && (
-                <div className="flex flex-col gap-2">
-                  <span className="text-xs font-bold text-on-surface">Vocabulario filológico</span>
+                <details className="rounded-lg bg-surface-container-low px-3 py-2">
+                  <summary className="text-xs font-bold text-on-surface cursor-pointer">
+                    Vocabulario filológico
+                  </summary>
                   <div className="space-y-2">
                     {page.glossary.map((item) => (
                       <div
@@ -811,7 +825,7 @@ function Lector() {
                       </div>
                     ))}
                   </div>
-                </div>
+                </details>
               )}
             </div>
 
@@ -834,7 +848,7 @@ function Lector() {
           style={toolbarStyle}
         >
           {!noteMode ? (
-            <div className="flex items-center gap-1.5">
+            <div className="flex flex-wrap items-center gap-1.5">
               {colores.map((color) => (
                 <button
                   key={color.key}
@@ -856,6 +870,17 @@ function Lector() {
               >
                 <span className="material-symbols-outlined text-sm">edit_note</span>
                 Añadir nota
+              </button>
+              <button
+                type="button"
+                data-testid="guardar-favorito"
+                onMouseDown={(event) => event.preventDefault()}
+                onClick={() => crearResaltado(noteColor, '', true)}
+                disabled={saving}
+                className="min-h-[44px] px-2.5 rounded-lg bg-amber-50 border border-amber-200 text-amber-900 text-[11px] font-semibold flex items-center gap-1 disabled:opacity-50"
+              >
+                <span className="material-symbols-outlined text-sm">star</span>
+                Guardar en favoritos
               </button>
             </div>
           ) : (
@@ -929,7 +954,7 @@ function Lector() {
             <p className="text-xs text-on-surface-variant bg-surface-container-low rounded-lg p-2.5 line-clamp-3">
               “{editing.text}”
             </p>
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2 flex-wrap">
               {colores.map((color) => (
                 <button
                   key={color.key}
@@ -942,6 +967,20 @@ function Lector() {
                   style={{ backgroundColor: color.swatch }}
                 />
               ))}
+              <button
+                type="button"
+                onClick={() => setEditFavorite((value) => !value)}
+                className={`min-h-[44px] px-3 rounded-lg text-[11px] font-semibold flex items-center gap-1 ${
+                  editFavorite
+                    ? 'bg-amber-100 text-amber-900 border border-amber-300'
+                    : 'bg-surface-container text-on-surface-variant'
+                }`}
+              >
+                <span className="material-symbols-outlined text-sm">
+                  {editFavorite ? 'star' : 'star_border'}
+                </span>
+                {editFavorite ? 'En favoritos' : 'Guardar en favoritos'}
+              </button>
               <span className="text-[11px] text-on-surface-variant ml-auto">{editNote.length}/500</span>
             </div>
             <textarea

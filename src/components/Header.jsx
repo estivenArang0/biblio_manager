@@ -76,11 +76,6 @@ function Header({ onMenu }) {
               type="search"
               aria-label="Buscar en el catálogo"
             />
-            <div className="absolute right-space-sm flex items-center gap-1">
-              <kbd className="px-1.5 py-0.5 bg-surface-container font-label-sm text-[10px] text-on-surface-variant rounded border border-outline-variant/30 font-mono">
-                Ctrl K
-              </kbd>
-            </div>
           </form>
         </div>
 
@@ -94,7 +89,12 @@ function Header({ onMenu }) {
           >
             <span className="material-symbols-outlined text-title-lg">logout</span>
           </button>
-          <div className="flex items-center gap-space-sm pl-1 sm:pl-space-sm min-w-0">
+          <button
+            type="button"
+            onClick={() => navigate('/perfil')}
+            className="flex items-center justify-end gap-space-sm pl-1 sm:pl-space-sm min-w-[44px] min-h-[44px] cursor-pointer"
+            title="Mi perfil"
+          >
             <div className="w-8 h-8 rounded-full bg-secondary-container flex items-center justify-center text-on-secondary-container font-label-sm text-label-sm font-semibold uppercase shrink-0">
               {nombre.substring(0, 2)}
             </div>
@@ -106,7 +106,7 @@ function Header({ onMenu }) {
                 {rolLabel}
               </span>
             </div>
-          </div>
+          </button>
         </div>
       </div>
     </header>

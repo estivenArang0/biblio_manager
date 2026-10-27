@@ -92,6 +92,7 @@ function migrate(db) {
       text TEXT NOT NULL,
       color TEXT NOT NULL,
       note TEXT,
+      is_favorite INTEGER NOT NULL DEFAULT 0,
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL
     );
@@ -156,6 +157,10 @@ function migrate(db) {
   }
   if (!bookColumns.some((column) => column.name === 'copies_available')) {
     db.exec('ALTER TABLE books ADD COLUMN copies_available INTEGER NOT NULL DEFAULT 3')
+  }
+  const highlightColumns = db.prepare('PRAGMA table_info(highlights)').all()
+  if (!highlightColumns.some((column) => column.name === 'is_favorite')) {
+    db.exec('ALTER TABLE highlights ADD COLUMN is_favorite INTEGER NOT NULL DEFAULT 0')
   }
 
   // Migración de roles antiguos (Estudiante/Docente/Administrador) a Lector/Bibliotecario.

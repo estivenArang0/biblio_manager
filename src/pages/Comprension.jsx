@@ -83,6 +83,11 @@ function Comprension() {
                   <div className="w-full h-2 rounded-full bg-surface-container mt-1 overflow-hidden">
                     <div className="h-full bg-secondary" style={{ width: `${item.percentage}%` }} />
                   </div>
+                  {item.message.startsWith('Buena') && item.failedBlocks?.length > 0 && (
+                    <p className="text-[10px] text-on-surface-variant mt-1">
+                      Repasa: {item.failedBlocks.map((block) => `Bloque ${block.block}`).join(', ')}
+                    </p>
+                  )}
                 </div>
               </div>
             </article>
