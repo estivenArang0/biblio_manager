@@ -1,0 +1,47 @@
+[
+  {
+    "isbn": "9788437604947",
+    "title": "Don Quijote de la Mancha",
+    "author": "Miguel de Cervantes Saavedra",
+    "genre": "Ficción clásica",
+    "description": "Edición de Cátedra de la novela fundacional de la literatura moderna, con introducción y notas de lectura.",
+    "image": "https://lh3.googleusercontent.com/aida-public/AB6AXuBlLvGgDX0_TiV05sYhQRZWAledbwJLoSdj-97apZPdQPF1NjcmN33qNt-9JwTReYJ572DbXC6cWsZYv3TIxk9eTCF4Zuv-htRt9056WRY0j08u1vxVyXiRrEgMxyEMMu13-LgEiPPLBjQ8X-gQ_kwIdTuqnrF3BRWGYsj_UE5AAmKZygf-M5ek9Ct0vAbtzRPCk3JTI8kRI3gQKskAARJN1RtADuOEgJMRZs8MGkTKYitItd4qn7d_",
+    "year": "2005"
+  },
+  {
+    "isbn": "9780307474728",
+    "title": "Cien años de soledad",
+    "author": "Gabriel García Márquez",
+    "genre": "Realismo mágico",
+    "description": "Edición conmemorativa de la saga de los Buendía y Macondo, obra central del realismo mágico latinoamericano.",
+    "image": "https://lh3.googleusercontent.com/aida-public/AB6AXuCPjpg2p2GAiCBNLbTd5PJQCuD_YGLtaF5V73FW-MZs7iRgS-sLFPOKhTKdNgFDwpRq5XZcHhWSB6RuTOkihDHJ1rSxvbUPqMYsBzDcLrndEqcTQc8O1SWvdZLkUMn6idGylHHuidY10ljor7rgORzbI1r4EII6_32Q5VijQkKUhhx9g3myjmV6XLhosdPT4wmaG_p5pGZLhdKwCwTaELOFk4CSIsbgcjgYQ7deiaY3z3KTxW0lTIi_",
+    "year": "2009"
+  },
+  {
+    "isbn": "9788417846184",
+    "title": "El infinito en un junco",
+    "author": "Irene Vallejo",
+    "genre": "Historia del libro",
+    "description": "Ensayo sobre la historia del libro, las bibliotecas y la transmisión de la cultura escrita.",
+    "image": "https://lh3.googleusercontent.com/aida-public/AB6AXuBDyeY-WNLxPSbMoBC8zWXOa3nurIRqHxIsoQ3Bh7jcUZc7syYfId8KLPw2O4OQWSIPE6neMW8KpV0XkRTZjsXzTE2ilmQ8u4Ojl-1oaXy7FO-2xSfDmdkNi5EYuCosR4llyJnTbG9xp6Qrfu2rLVa2wi7tLxXUlBrg0P0XmwT-d4VYF1G4kerFazJpoaTS2QfnykwxGdwwQPqGbVvhwtfqi1cYY5GFFe60mcm8iJFzL9s7DlMZz58j",
+    "year": "2019"
+  },
+  {
+    "isbn": "9788420674330",
+    "title": "El Aleph",
+    "author": "Jorge Luis Borges",
+    "genre": "Ensayo y ficción",
+    "description": "Colección de cuentos y ensayos donde Borges explora el infinito, la memoria y los laberintos del lenguaje.",
+    "image": "https://lh3.googleusercontent.com/aida-public/AB6AXuD3X7-ZzbvoiMYM6KjMkLh2nKVmA_wQc7MAFaROPOYboFDYEsqI5Efpp0OZWRTABlm-AMqoE-OnpyGxrawQg1rOY7ycnh-D6p28x64e7caRucmvaPzAZycR0FHI1c_Tq1m7_1I3TVYMU5NZr_dtaCXbFO1jrfBV5mgUSXi6972_Aj_hoCIVgKrQYgBggVOmfoyVrgobuOYKlty7gqrZy36fdL7KOnLDIZMSY13DodgJ1qKVsiEeDRct",
+    "year": "1997"
+  },
+  {
+    "isbn": "9780062316097",
+    "title": "Sapiens: De animales a dioses",
+    "author": "Yuval Noah Harari",
+    "genre": "Historia y divulgación",
+    "description": "Recorrido por la historia de la humanidad desde la revolución cognitiva hasta la era tecnológica.",
+    "image": "https://images.unsplash.com/photo-1544947950-fa07a98d237f?auto=format&fit=crop&q=80&w=600",
+    "year": "2015"
+  }
+]
