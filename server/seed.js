@@ -489,3 +489,60 @@ export function buildSeedReadingEvents() {
     { user: 'profesor.jaramillo@tdea.edu.co', book: 'formas-tipograficas', event: 'close', at: `${addDays(today, -2)}T09:55:00.000Z` },
   ]
 }
+
+/**
+ * Marcas de ejemplo del lector demo para que "Favoritos y notas" y el panel
+ * "Mis marcas" nunca aparezcan vacíos en la sustentación.
+ *
+ * `needle` se busca dentro del párrafo real del libro, así los offsets siempre
+ * son coherentes con el contenido sembrado.
+ */
+export function buildSeedHighlights() {
+  return [
+    {
+      book: 'quijote',
+      page: 0,
+      blockIndex: 0,
+      needle: 'desaforados gigantes',
+      color: 'amarillo',
+      note: '',
+      isFavorite: false,
+    },
+    {
+      book: 'quijote',
+      page: 0,
+      blockIndex: 1,
+      needle: 'no son gigantes, sino molinos de viento',
+      color: 'verde',
+      note: 'Sancho corrige la lectura idealista de don Quijote: el sentido común como ancla de la realidad.',
+      isFavorite: false,
+    },
+    {
+      book: 'quijote',
+      page: 1,
+      blockIndex: 1,
+      needle: 'gigante Briareo',
+      color: 'azul',
+      note: '',
+      isFavorite: true,
+    },
+    {
+      book: 'cien-anos',
+      page: 0,
+      blockIndex: 1,
+      needle: 'inmersión directa en las problemáticas estilísticas',
+      color: 'amarillo',
+      note: '',
+      isFavorite: true,
+    },
+    {
+      book: 'cien-anos',
+      page: 0,
+      blockIndex: 2,
+      needle: 'recursos retóricos',
+      color: 'azul',
+      note: '',
+      isFavorite: false,
+    },
+  ]
+}

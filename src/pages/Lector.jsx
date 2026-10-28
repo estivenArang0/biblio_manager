@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import LoadingScreen from '../components/LoadingScreen'
 import { api } from '../services/api'
@@ -41,6 +41,8 @@ function Lector() {
   const [editNote, setEditNote] = useState('')
   const [editFavorite, setEditFavorite] = useState(false)
   const [saving, setSaving] = useState(false)
+  const [marksOpen, setMarksOpen] = useState(false)
+  const [flashId, setFlashId] = useState(null)
 
   const [fontIndex, setFontIndex] = useState(1)
   const [mode, setMode] = useState('light')
@@ -55,6 +57,8 @@ function Lector() {
 
   const articleRef = useRef(null)
   const openedRef = useRef(false)
+  const selectionTimer = useRef(null)
+  const selectionRef = useRef(null)
   const activitiesRef = useRef({})
   const totalsRef = useRef({ answered: 0, correct: 0, totalTrivias: 0 })
 
@@ -120,6 +124,7 @@ function Lector() {
         setReflectionText(guardada?.activityType === 'reflection' ? guardada.answer : '')
         setReflectionDone(guardada?.activityType === 'reflection')
         api.saveReadingProgress(bookId, index).catch(() => {})
+        selectionRef.current = null
         setSelection(null)
         setNoteMode(false)
         window.scrollTo({ top: 0, behavior: 'smooth' })
@@ -184,7 +189,7 @@ function Lector() {
     setToast(mensaje)
   }
 
-  const handleMouseUp = () => {
+  const capturarSeleccion = useCallback(() => {
     const sel = window.getSelection()
     if (!sel || sel.isCollapsed || sel.rangeCount === 0) {
       setSelection(null)
@@ -217,42 +222,99 @@ function Lector() {
       setSelection(null)
       return
     }
-    const rect = range.getBoundingClientRect()
-    setSelection({
-      blockIndex: Number(blockEl.dataset.blockIndex),
+    const blockIndex = Number(blockEl.dataset.blockIndex)
+    const end = start + text.length
+    const overlapping = highlights.find(
+      (item) =>
+        item.page === index &&
+        item.blockIndex === blockIndex &&
+        item.startOffset < end &&
+        item.endOffset > start
+    )
+    const siguiente = {
+      blockIndex,
       start,
-      end: start + text.length,
+      end,
       text,
-      top: rect.top,
-      bottom: rect.bottom,
-      left: rect.left,
-      right: rect.right,
-    })
+      highlightId: overlapping ? overlapping.id : null,
+    }
+    selectionRef.current = siguiente
+    setSelection(siguiente)
     setNoteMode(false)
     setNoteDraft('')
+  }, [highlights, index])
+
+  // La selección se sigue también por evento: ratón, teclado y asas táctiles.
+  useEffect(() => {
+    const manejar = () => {
+      if (selectionTimer.current) clearTimeout(selectionTimer.current)
+      selectionTimer.current = setTimeout(() => {
+        if (noteMode) return
+        const active = document.activeElement
+        if (active && (active.tagName === 'INPUT' || active.tagName === 'TEXTAREA')) return
+        const sel = window.getSelection()
+        if (sel && !sel.isCollapsed) capturarSeleccion()
+        else setSelection(null)
+      }, 200)
+    }
+    document.addEventListener('selectionchange', manejar)
+    return () => {
+      document.removeEventListener('selectionchange', manejar)
+      if (selectionTimer.current) clearTimeout(selectionTimer.current)
+    }
+  }, [capturarSeleccion, noteMode])
+
+  const mantenerSeleccion = (event) => {
+    // Evita que el clic en la barra colapse la selección; no cancelamos touchstart
+    // para que el navegador móvil siga emitiendo el evento clic.
+    if (event.type === 'touchstart') return
+    event.preventDefault()
   }
 
-  const crearResaltado = async (color, note = '', isFavorite = false) => {
-    if (!selection) return
+  const quitarSeleccionada = async () => {
+    const activa = selectionRef.current || selection
+    if (!activa?.highlightId) return
+    setSaving(true)
+    try {
+      await api.deleteHighlight(activa.highlightId)
+      setHighlights((prev) => prev.filter((item) => item.id !== activa.highlightId))
+      selectionRef.current = null
+      setSelection(null)
+      window.getSelection()?.removeAllRanges()
+      setToast('Marca eliminada.')
+    } catch (err) {
+      setToast(err.message || 'No se pudo quitar la marca.')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const crearResaltado = async (color, note = '', isFavorite = false, mensaje = '') => {
+    const activa = selectionRef.current || selection
+    if (!activa) return
     setSaving(true)
     try {
       const data = await api.createHighlight({
         bookId,
         page: index,
-        blockIndex: selection.blockIndex,
-        startOffset: selection.start,
-        endOffset: selection.end,
-        text: selection.text,
+        blockIndex: activa.blockIndex,
+        startOffset: activa.start,
+        endOffset: activa.end,
+        text: activa.text,
         color,
         note,
         isFavorite,
       })
       setHighlights((prev) => [...prev, data.highlight])
+      selectionRef.current = null
       setSelection(null)
       setNoteMode(false)
       setNoteDraft('')
       window.getSelection()?.removeAllRanges()
-      setToast('Resaltado guardado.')
+      setToast(
+        mensaje ||
+          (isFavorite ? 'Guardado en favoritos.' : note ? 'Nota añadida.' : 'Resaltado guardado.')
+      )
     } catch (err) {
       setToast(err.message || 'No se pudo guardar el resaltado.')
     } finally {
@@ -329,8 +391,11 @@ function Lector() {
       segmento.highlight ? (
         <mark
           key={segmento.key}
-          className={`lector-mark lector-mark-${segmento.highlight.color}`}
+          className={`lector-mark lector-mark-${segmento.highlight.color} ${
+            flashId === segmento.highlight.id ? 'lector-mark-flash' : ''
+          }`}
           data-note={segmento.highlight.note ? '1' : '0'}
+          data-fav={segmento.highlight.isFavorite ? '1' : '0'}
           data-hid={segmento.highlight.id}
           title={segmento.highlight.note || 'Resaltado: clic para editar'}
           onClick={() => {
@@ -339,6 +404,11 @@ function Lector() {
           }}
         >
           {segmento.texto}
+          {segmento.highlight.isFavorite && (
+            <span className="lector-mark-star" aria-label="Favorito">
+              ★
+            </span>
+          )}
         </mark>
       ) : (
         <span key={segmento.key}>{segmento.texto}</span>
@@ -396,13 +466,39 @@ function Lector() {
     setIndex(nextIndex)
   }
 
-  const toolbarStyle = useMemo(() => {
-    if (!selection) return null
-    const width = Math.min(290, window.innerWidth - 16)
-    const left = Math.min(Math.max(8, (selection.left + selection.right) / 2 - width / 2), window.innerWidth - width - 8)
-    const top = selection.top > 90 ? selection.top - 58 : selection.bottom + 10
-    return { left, top, width }
-  }, [selection])
+  const irAMarca = (marca) => {
+    setMarksOpen(false)
+    setFlashId(marca.id)
+    if (marca.page !== index) irAPagina(marca.page)
+    setTimeout(() => setFlashId(null), 2400)
+  }
+
+  const borrarMarca = async (marca) => {
+    try {
+      await api.deleteHighlight(marca.id)
+      setHighlights((prev) => prev.filter((item) => item.id !== marca.id))
+      setToast('Marca eliminada.')
+    } catch (err) {
+      setToast(err.message || 'No se pudo borrar la marca.')
+    }
+  }
+
+  const alternarFavoritoMarca = async (marca) => {
+    try {
+      const data = await api.updateHighlight(marca.id, { isFavorite: !marca.isFavorite })
+      setHighlights((prev) =>
+        prev.map((item) => (item.id === marca.id ? { ...item, ...data.highlight } : item))
+      )
+      setToast(data.highlight.isFavorite ? 'Guardado en favoritos.' : 'Quitado de favoritos.')
+    } catch (err) {
+      setToast(err.message || 'No se pudo actualizar el favorito.')
+    }
+  }
+
+  const editarMarca = (marca) => {
+    setMarksOpen(false)
+    abrirEdicion(marca)
+  }
 
   if (loading) return <LoadingScreen label="Validando préstamo y abriendo el libro…" />
 
@@ -505,6 +601,16 @@ function Lector() {
           </div>
 
           <div className="flex flex-wrap items-center gap-2 justify-between lg:justify-end">
+            <button
+              type="button"
+              data-testid="abrir-mis-marcas"
+              onClick={() => setMarksOpen(true)}
+              className="flex items-center gap-1.5 min-h-[44px] px-2.5 rounded-lg bg-surface-container text-on-surface font-label-md text-[11px] font-semibold hover:bg-surface-container-high"
+            >
+              <span className="material-symbols-outlined text-base">bookmarks</span>
+              Mis marcas ({highlights.length})
+            </button>
+
             <span className="flex items-center gap-1.5 px-2 py-1 rounded-lg bg-surface-container-low text-secondary font-label-md text-[11px] font-semibold">
               <span className="material-symbols-outlined text-base">insights</span>
               Aciertos {activityTotals.correct} de {activityTotals.totalTrivias}
@@ -552,6 +658,83 @@ function Lector() {
           </div>
         </div>
 
+        <div className="max-w-[1720px] mx-auto w-full px-3 sm:px-6 pb-2">
+          <div
+            data-testid="barra-resaltado"
+            className="rounded-xl border border-outline-variant/30 bg-surface-container-low/60 p-2 flex flex-col gap-1.5"
+          >
+            <div className="grid grid-cols-3 gap-1.5 sm:flex sm:flex-wrap sm:items-center">
+              {colores.map((color) => (
+                <button
+                  key={color.key}
+                  type="button"
+                  data-testid={`resaltar-${color.key}`}
+                  aria-label={`Resaltar en ${color.label.toLowerCase()}`}
+                  disabled={!selection || saving}
+                  onPointerDown={mantenerSeleccion}
+                  onTouchStart={mantenerSeleccion}
+                  onClick={() =>
+                    crearResaltado(
+                      color.key,
+                      '',
+                      false,
+                      `Resaltado ${color.label.toLowerCase()} guardado.`
+                    )
+                  }
+                  className="min-h-[44px] px-2 rounded-lg border border-outline-variant/40 bg-surface-container-lowest text-on-surface text-[11px] font-semibold flex items-center justify-center gap-1.5 disabled:opacity-40 disabled:cursor-not-allowed"
+                >
+                  <span
+                    className="w-4 h-4 rounded-full border border-black/10 shrink-0"
+                    style={{ backgroundColor: color.swatch }}
+                  />
+                  {color.label}
+                </button>
+              ))}
+              <button
+                type="button"
+                data-testid="anadir-nota"
+                disabled={!selection || saving}
+                onPointerDown={mantenerSeleccion}
+                onTouchStart={mantenerSeleccion}
+                onClick={() => setNoteMode(true)}
+                className="min-h-[44px] px-2 rounded-lg border border-outline-variant/40 bg-surface-container-lowest text-on-surface text-[11px] font-semibold flex items-center justify-center gap-1.5 disabled:opacity-40 disabled:cursor-not-allowed"
+              >
+                <span className="material-symbols-outlined text-base">edit_note</span>
+                Añadir nota
+              </button>
+              <button
+                type="button"
+                data-testid="guardar-favorito"
+                disabled={!selection || saving}
+                onPointerDown={mantenerSeleccion}
+                onTouchStart={mantenerSeleccion}
+                onClick={() => crearResaltado(noteColor, '', true, 'Guardado en favoritos.')}
+                className="min-h-[44px] px-2 rounded-lg border border-amber-200 bg-amber-50 text-amber-900 text-[11px] font-semibold flex items-center justify-center gap-1.5 disabled:opacity-40 disabled:cursor-not-allowed"
+              >
+                <span className="material-symbols-outlined text-base">star</span>
+                Guardar en favoritos
+              </button>
+              <button
+                type="button"
+                data-testid="quitar-marca"
+                disabled={!selection?.highlightId || saving}
+                onPointerDown={mantenerSeleccion}
+                onTouchStart={mantenerSeleccion}
+                onClick={quitarSeleccionada}
+                className="min-h-[44px] px-2 rounded-lg border border-outline-variant/40 bg-surface-container-lowest text-on-surface-variant text-[11px] font-semibold flex items-center justify-center gap-1.5 disabled:opacity-40 disabled:cursor-not-allowed"
+              >
+                <span className="material-symbols-outlined text-base">format_color_reset</span>
+                Quitar marca
+              </button>
+            </div>
+            <p className="text-[11px] leading-snug text-on-surface-variant" data-testid="ayuda-seleccion">
+              {selection
+                ? `Seleccionado: “${selection.text.slice(0, 60)}${selection.text.length > 60 ? '…' : ''}”`
+                : 'Selecciona un texto del libro para resaltarlo, anotarlo o guardarlo.'}
+            </p>
+          </div>
+        </div>
+
         <div className="w-full bg-surface-container h-1 relative overflow-hidden">
           <div
             className="bg-secondary h-full transition-all duration-300"
@@ -578,7 +761,9 @@ function Lector() {
               onCopy={(event) => bloquear(event, 'El contenido está protegido: copiar no está permitido.')}
               onCut={(event) => bloquear(event, 'El contenido está protegido: cortar no está permitido.')}
               onDragStart={(event) => bloquear(event, 'No se puede arrastrar el contenido del libro.')}
-              onMouseUp={handleMouseUp}
+              onMouseUp={capturarSeleccion}
+              onTouchEnd={capturarSeleccion}
+              onKeyUp={capturarSeleccion}
               className="relative rounded-xl p-5 sm:p-8 md:p-12 shadow-sm transition-colors duration-300 overflow-hidden border border-outline-variant/20"
               style={{ backgroundColor: modoActual.bg, color: modoActual.color }}
             >
@@ -840,99 +1025,185 @@ function Lector() {
         </div>
       </div>
 
-      {/* Barra flotante de resaltado */}
-      {selection && toolbarStyle && (
-        <div
-          data-testid="barra-resaltado"
-          className="fixed z-[60] bg-surface-container-lowest rounded-xl shadow-xl border border-outline-variant/30 p-2 flex flex-col gap-2"
-          style={toolbarStyle}
-        >
-          {!noteMode ? (
-            <div className="flex flex-wrap items-center gap-1.5">
+      {/* Editor de nota para la selección actual */}
+      {noteMode && selection && (
+        <div className="fixed inset-0 z-[70] bg-black/40 backdrop-blur-sm flex items-end sm:items-center justify-center p-0 sm:p-4">
+          <div className="w-full sm:max-w-md bg-surface-container-lowest rounded-t-2xl sm:rounded-xl shadow-2xl border border-outline-variant/30 p-4 flex flex-col gap-3">
+            <div className="flex items-start justify-between gap-2">
+              <h3 className="font-title-md font-bold text-on-surface">Añadir nota</h3>
+              <button
+                type="button"
+                aria-label="Cerrar"
+                onClick={() => {
+                  setNoteMode(false)
+                  setNoteDraft('')
+                }}
+                className="w-11 h-11 -mr-2 -mt-2 flex items-center justify-center text-on-surface-variant"
+              >
+                <span className="material-symbols-outlined">close</span>
+              </button>
+            </div>
+            <p className="text-xs text-on-surface-variant bg-surface-container-low rounded-lg p-2 line-clamp-3">
+              “{selection.text}”
+            </p>
+            <div className="flex items-center gap-2">
               {colores.map((color) => (
                 <button
                   key={color.key}
                   type="button"
-                  title={`Resaltar en ${color.label.toLowerCase()}`}
-                  aria-label={`Resaltar en ${color.label.toLowerCase()}`}
-                  disabled={saving}
-                  onClick={() => crearResaltado(color.key)}
-                  onMouseDown={(event) => event.preventDefault()}
-                  className="w-11 h-11 rounded-full border border-black/10 shadow-sm disabled:opacity-50"
+                  aria-label={`Color ${color.label}`}
+                  onClick={() => setNoteColor(color.key)}
+                  className={`w-11 h-11 rounded-full border-2 ${
+                    noteColor === color.key ? 'border-on-surface' : 'border-transparent'
+                  }`}
                   style={{ backgroundColor: color.swatch }}
                 />
               ))}
+              <span className="text-[10px] text-on-surface-variant ml-auto">{noteDraft.length}/500</span>
+            </div>
+            <textarea
+              data-testid="nota-nueva"
+              autoFocus
+              rows={3}
+              maxLength={500}
+              value={noteDraft}
+              onChange={(event) => setNoteDraft(event.target.value)}
+              placeholder="Escribe tu nota…"
+              className="w-full text-xs p-2.5 rounded-lg bg-surface-container-low text-on-surface focus:outline-none resize-y"
+            />
+            <div className="flex justify-end gap-2">
               <button
                 type="button"
-                onMouseDown={(event) => event.preventDefault()}
-                onClick={() => setNoteMode(true)}
-                className="ml-1 min-h-[44px] px-2.5 rounded-lg bg-surface-container hover:bg-surface-container-high text-on-surface text-[11px] font-semibold flex items-center gap-1"
+                onClick={() => {
+                  setNoteMode(false)
+                  setNoteDraft('')
+                }}
+                className="min-h-[44px] px-3 rounded-lg bg-surface-container text-on-surface text-[11px] font-semibold"
               >
-                <span className="material-symbols-outlined text-sm">edit_note</span>
-                Añadir nota
+                Cancelar
               </button>
               <button
                 type="button"
-                data-testid="guardar-favorito"
-                onMouseDown={(event) => event.preventDefault()}
-                onClick={() => crearResaltado(noteColor, '', true)}
-                disabled={saving}
-                className="min-h-[44px] px-2.5 rounded-lg bg-amber-50 border border-amber-200 text-amber-900 text-[11px] font-semibold flex items-center gap-1 disabled:opacity-50"
+                data-testid="nota-nueva-guardar"
+                disabled={saving || !noteDraft.trim()}
+                onClick={() => crearResaltado(noteColor, noteDraft, false, 'Nota añadida.')}
+                className="min-h-[44px] px-3 rounded-lg bg-primary text-on-primary text-[11px] font-bold disabled:opacity-50"
               >
-                <span className="material-symbols-outlined text-sm">star</span>
-                Guardar en favoritos
+                Guardar nota
               </button>
             </div>
-          ) : (
-            <div className="flex flex-col gap-2">
-              <div className="flex items-center gap-1.5">
-                {colores.map((color) => (
-                  <button
-                    key={color.key}
-                    type="button"
-                    aria-label={`Color ${color.label}`}
-                    onClick={() => setNoteColor(color.key)}
-                    className={`w-11 h-11 rounded-full border-2 ${
-                      noteColor === color.key ? 'border-on-surface' : 'border-transparent'
-                    }`}
-                    style={{ backgroundColor: color.swatch }}
-                  />
-                ))}
-                <span className="text-[10px] text-on-surface-variant ml-1">Nota (máx. 500)</span>
+          </div>
+        </div>
+      )}
+
+      {/* Panel de marcas del libro abierto */}
+      {marksOpen && (
+        <div className="fixed inset-0 z-[65]">
+          <button
+            type="button"
+            aria-label="Cerrar mis marcas"
+            onClick={() => setMarksOpen(false)}
+            className="absolute inset-0 bg-black/40"
+          />
+          <aside
+            data-testid="panel-mis-marcas"
+            className="absolute inset-x-0 bottom-0 max-h-[78vh] lg:inset-y-0 lg:left-auto lg:right-0 lg:w-[400px] lg:max-h-none bg-surface-container-lowest rounded-t-2xl lg:rounded-none border-t lg:border-t-0 lg:border-l border-outline-variant/30 shadow-2xl flex flex-col"
+          >
+            <header className="flex items-center justify-between gap-2 p-3 border-b border-outline-variant/25">
+              <div className="flex flex-col">
+                <h2 className="font-title-md font-bold text-on-surface font-serif">Mis marcas</h2>
+                <span className="text-[11px] text-on-surface-variant">
+                  {highlights.length} en este libro
+                </span>
               </div>
-              <textarea
-                data-testid="nota-nueva"
-                autoFocus
-                rows={2}
-                maxLength={500}
-                value={noteDraft}
-                onChange={(event) => setNoteDraft(event.target.value)}
-                placeholder="Escribe tu nota…"
-                className="w-full text-xs p-2 rounded-lg bg-surface-container-low text-on-surface focus:outline-none resize-none"
-              />
-              <div className="flex justify-end gap-2">
-                <button
-                  type="button"
-                  onClick={() => {
-                    setNoteMode(false)
-                    setNoteDraft('')
-                  }}
-                  className="min-h-[44px] px-2.5 rounded-lg bg-surface-container text-on-surface text-[11px]"
-                >
-                  Cancelar
-                </button>
-                <button
-                  type="button"
-                  data-testid="nota-nueva-guardar"
-                  disabled={saving}
-                  onClick={() => crearResaltado(noteColor, noteDraft)}
-                  className="min-h-[44px] px-2.5 rounded-lg bg-primary text-on-primary text-[11px] font-bold disabled:opacity-50"
-                >
-                  Guardar
-                </button>
-              </div>
+              <button
+                type="button"
+                aria-label="Cerrar"
+                onClick={() => setMarksOpen(false)}
+                className="w-11 h-11 flex items-center justify-center text-on-surface-variant"
+              >
+                <span className="material-symbols-outlined">close</span>
+              </button>
+            </header>
+            <div className="flex-1 overflow-y-auto p-3 flex flex-col gap-2">
+              {highlights.length === 0 ? (
+                <p className="text-xs text-on-surface-variant text-center py-8">
+                  Aún no tienes marcas en este libro. Selecciona un texto y usa la barra de arriba.
+                </p>
+              ) : (
+                [...highlights]
+                  .sort((a, b) => a.page - b.page || a.startOffset - b.startOffset)
+                  .map((marca) => (
+                    <article
+                      key={marca.id}
+                      data-testid="marca-item"
+                      className="rounded-xl border border-outline-variant/25 bg-surface-container-low/40 p-2.5 flex flex-col gap-1.5"
+                    >
+                      <button
+                        type="button"
+                        onClick={() => irAMarca(marca)}
+                        className="text-left flex items-start gap-2 min-h-[44px]"
+                      >
+                        <span
+                          className={`w-3 h-3 rounded-full mt-1 shrink-0 ${
+                            marca.color === 'verde'
+                              ? 'bg-green-400'
+                              : marca.color === 'azul'
+                                ? 'bg-blue-400'
+                                : 'bg-yellow-300'
+                          }`}
+                        />
+                        <span className="flex-1 text-xs text-on-surface leading-snug">
+                          “{marca.text}”
+                        </span>
+                        {marca.isFavorite && (
+                          <span
+                            className="material-symbols-outlined text-base text-amber-600"
+                            aria-label="Favorito"
+                          >
+                            star
+                          </span>
+                        )}
+                      </button>
+                      {marca.note && (
+                        <p className="text-[11px] text-on-surface bg-surface-container-low rounded-md p-2 whitespace-pre-wrap">
+                          {marca.note}
+                        </p>
+                      )}
+                      <div className="flex items-center gap-2 flex-wrap text-[10px] text-on-surface-variant">
+                        <span>Página {marca.page + 1}</span>
+                        <button
+                          type="button"
+                          aria-label={marca.isFavorite ? 'Quitar de favoritos' : 'Guardar en favoritos'}
+                          onClick={() => alternarFavoritoMarca(marca)}
+                          className={`min-h-[44px] min-w-[44px] flex items-center justify-center ${
+                            marca.isFavorite ? 'text-amber-600' : 'text-on-surface-variant'
+                          }`}
+                        >
+                          <span className="material-symbols-outlined text-lg">
+                            {marca.isFavorite ? 'star' : 'star_border'}
+                          </span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => editarMarca(marca)}
+                          className="min-h-[44px] px-2 text-[11px] font-semibold text-secondary"
+                        >
+                          Editar nota
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => borrarMarca(marca)}
+                          className="min-h-[44px] px-2 text-[11px] font-semibold text-red-700"
+                        >
+                          Borrar
+                        </button>
+                      </div>
+                    </article>
+                  ))
+              )}
             </div>
-          )}
+          </aside>
         </div>
       )}
 

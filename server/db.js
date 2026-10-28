@@ -5,6 +5,7 @@ import { fileURLToPath } from 'node:url'
 import { hashPassword } from './auth.js'
 import {
   DEMO_PASSWORD,
+  buildSeedHighlights,
   buildSeedLoans,
   buildSeedReadingEvents,
   seedBooks,
@@ -304,6 +305,53 @@ function seed(db) {
   }
 }
 
+/**
+ * Marcas de ejemplo del lector demo. Es idempotente por marca, de modo que
+ * sirve tanto en una base nueva como en la que ya existe en local.
+ */
+function ensureDemoMarks(db) {
+  const student = db
+    .prepare("SELECT id FROM users WHERE correo = 'estudiante@tdea.edu.co'")
+    .get()
+  if (!student) return
+  const insert = db.prepare(
+    `INSERT INTO highlights (user_id, book_id, page, block_index, start_offset, end_offset, text, color, note, is_favorite, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+  )
+  const existe = db.prepare(
+    'SELECT id FROM highlights WHERE user_id = ? AND book_id = ? AND text = ? LIMIT 1'
+  )
+  const now = new Date().toISOString()
+  for (const mark of buildSeedHighlights()) {
+    if (existe.get(student.id, mark.book, mark.needle)) continue
+    const book = db.prepare('SELECT pages_json FROM books WHERE id = ?').get(mark.book)
+    if (!book) continue
+    let pages = []
+    try {
+      pages = JSON.parse(book.pages_json || '[]')
+    } catch {
+      pages = []
+    }
+    const paragraph = pages[mark.page]?.paragraphs?.[mark.blockIndex] || ''
+    const start = paragraph.indexOf(mark.needle)
+    if (start < 0) continue
+    insert.run(
+      student.id,
+      mark.book,
+      mark.page,
+      mark.blockIndex,
+      start,
+      start + mark.needle.length,
+      mark.needle,
+      mark.color,
+      mark.note || '',
+      mark.isFavorite ? 1 : 0,
+      now,
+      now
+    )
+  }
+}
+
 export function getDb() {
   if (database) return database
   if (dbPath !== ':memory:') {
@@ -313,5 +361,6 @@ export function getDb() {
   database.exec('PRAGMA journal_mode = WAL;')
   migrate(database)
   seed(database)
+  ensureDemoMarks(database)
   return database
 }

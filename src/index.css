@@ -77,6 +77,36 @@
   color: rgba(0, 0, 0, 0.55);
 }
 
+.lector-mark-star {
+  display: inline-block;
+  margin-left: 2px;
+  font-size: 0.65em;
+  line-height: 1;
+  color: #b45309;
+  vertical-align: super;
+}
+
+.lector-mark-flash {
+  animation: lectorFlash 0.9s ease-in-out 2;
+}
+
+@keyframes lectorFlash {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 rgba(245, 158, 11, 0);
+  }
+  50% {
+    box-shadow: 0 0 0 3px rgba(245, 158, 11, 0.65);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .lector-mark-flash {
+    animation: none;
+    outline: 2px solid rgba(245, 158, 11, 0.75);
+  }
+}
+
 /* Bloqueo a nivel de renderizado para impresión o guardado como PDF */
 @media print {
   body {

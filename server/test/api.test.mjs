@@ -1060,3 +1060,90 @@ test('comprensión: umbral 50 % y lista de bloques fallados', async () => {
   assert.equal(fila.message, 'Buena, repasa estos bloques')
   assert.deepEqual(fila.failedBlocks.map((block) => block.block), [2])
 })
+
+test('marcas: resaltado, nota y favorito propios, aislados y borrables', async () => {
+  const base = {
+    bookId: 'quijote',
+    page: 2,
+    blockIndex: 0,
+    startOffset: 0,
+    endOffset: 12,
+    text: 'Dejamos en la',
+  }
+
+  const resaltado = await request('/highlights', {
+    method: 'POST',
+    token: tokens.estudiante,
+    body: { ...base, color: 'amarillo' },
+  })
+  assert.equal(resaltado.status, 201)
+  assert.equal(resaltado.body.highlight.note, '')
+  assert.equal(resaltado.body.highlight.isFavorite, false)
+
+  const nota = await request('/highlights', {
+    method: 'POST',
+    token: tokens.estudiante,
+    body: { ...base, startOffset: 20, endOffset: 42, text: 'valeroso vizcaíno', color: 'verde', note: 'Marca de prueba automática' },
+  })
+  assert.equal(nota.status, 201)
+
+  const favorito = await request('/highlights', {
+    method: 'POST',
+    token: tokens.estudiante,
+    body: { ...base, startOffset: 60, endOffset: 78, text: 'espadas altas', color: 'azul', isFavorite: true },
+  })
+  assert.equal(favorito.status, 201)
+
+  const ids = [resaltado.body.highlight.id, nota.body.highlight.id, favorito.body.highlight.id]
+
+  const propias = await request('/fragments', { token: tokens.estudiante })
+  assert.equal(propias.status, 200)
+  const porId = new Map(propias.body.fragments.map((item) => [item.id, item]))
+  for (const id of ids) assert.ok(porId.has(id), `falta la marca ${id} en el listado propio`)
+  assert.equal(porId.get(nota.body.highlight.id).note, 'Marca de prueba automática')
+  assert.equal(porId.get(favorito.body.highlight.id).isFavorite, true)
+  assert.equal(porId.get(resaltado.body.highlight.id).color, 'amarillo')
+  assert.equal(porId.get(resaltado.body.highlight.id).canRead, true)
+  assert.equal(porId.get(resaltado.body.highlight.id).bookId, 'quijote')
+  assert.ok(porId.get(resaltado.body.highlight.id).title)
+
+  // Las marcas de ejemplo del lector demo siguen presentes y son suyas.
+  assert.ok(
+    propias.body.fragments.some((item) => item.bookId === 'quijote' && item.text === 'desaforados gigantes')
+  )
+
+  // Otro lector no ve ni puede tocar las marcas ajenas.
+  const ajenas = await request('/fragments', { token: tokens.mateo })
+  assert.equal(ajenas.status, 200)
+  for (const id of ids) assert.ok(!ajenas.body.fragments.some((item) => item.id === id))
+  const tocarAjena = await request(`/highlights/${ids[0]}`, {
+    method: 'PUT',
+    token: tokens.mateo,
+    body: { note: 'intruso' },
+  })
+  assert.equal(tocarAjena.status, 404)
+  const borrarAjena = await request(`/highlights/${ids[0]}`, {
+    method: 'DELETE',
+    token: tokens.mateo,
+  })
+  assert.equal(borrarAjena.status, 404)
+
+  // Quitar favorito y borrar.
+  const quitar = await request(`/highlights/${favorito.body.highlight.id}`, {
+    method: 'PUT',
+    token: tokens.estudiante,
+    body: { isFavorite: false },
+  })
+  assert.equal(quitar.status, 200)
+  assert.equal(quitar.body.highlight.isFavorite, false)
+
+  for (const id of ids) {
+    const borrado = await request(`/highlights/${id}`, {
+      method: 'DELETE',
+      token: tokens.estudiante,
+    })
+    assert.equal(borrado.status, 200)
+  }
+  const despues = await request('/fragments', { token: tokens.estudiante })
+  for (const id of ids) assert.ok(!despues.body.fragments.some((item) => item.id === id))
+})
